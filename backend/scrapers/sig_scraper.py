@@ -24,8 +24,6 @@ class SigScraper(BaseScraper):
 
         try:
             async with engine.new_page_with_images() as page:
-                logger.info(f"[SIG] Navigating to {search_url}")
-
                 # Collect API responses that might contain product data
                 api_products = []
 
@@ -39,13 +37,13 @@ class SigScraper(BaseScraper):
                             if any(kw in body.lower() for kw in [
                                 "product", "produkt", "nazwa", "price", "cena",
                             ]):
-                                logger.info(f"[SIG] Intercepted API response: {url[:120]}")
+                                logger.info(f"[SIG] Intercepted API: {url[:120]}")
                                 try:
                                     data = json.loads(body)
                                     extracted = self._extract_from_api(data)
                                     if extracted:
                                         api_products.extend(extracted)
-                                        logger.info(f"[SIG] Extracted {len(extracted)} products from API")
+                                        logger.info(f"[SIG] Got {len(extracted)} products from API")
                                 except json.JSONDecodeError:
                                     pass
                     except Exception:
@@ -53,11 +51,12 @@ class SigScraper(BaseScraper):
 
                 page.on("response", handle_response)
 
-                # First visit the homepage to get cookies
+                # --- Strategy A: Use the search bar like a real user ---
+                logger.info(f"[SIG] Going to homepage to use search bar")
                 await page.goto(self.base_url, wait_until="domcontentloaded")
-                await human_delay(page, 1000, 2000)
+                await human_delay(page, 1500, 2500)
 
-                # Handle cookie consent if present
+                # Handle cookie consent
                 try:
                     cookie_btn = page.locator(
                         "button:has-text('Akceptuję'), "
@@ -76,138 +75,90 @@ class SigScraper(BaseScraper):
 
                 await human_mouse_move(page)
 
-                # Navigate to search
-                await page.goto(search_url, wait_until="domcontentloaded")
-                await human_delay(page, 2000, 4000)
+                # Find and use the search input field
+                search_submitted = False
+                search_selectors = [
+                    "input[name='searchquery']",
+                    "input[name='search']",
+                    "input[name='q']",
+                    "input[type='search']",
+                    "input[placeholder*='szukaj' i]",
+                    "input[placeholder*='Szukaj' i]",
+                    "input[placeholder*='search' i]",
+                    "input[placeholder*='Wpisz' i]",
+                    "input[placeholder*='produkt' i]",
+                    "input[class*='search']",
+                    "input[id*='search']",
+                    "[class*='search'] input[type='text']",
+                    "[class*='search-bar'] input",
+                    "header input[type='text']",
+                    "nav input[type='text']",
+                ]
+
+                for sel in search_selectors:
+                    try:
+                        search_input = page.locator(sel).first
+                        if await search_input.is_visible(timeout=1500):
+                            logger.info(f"[SIG] Found search input: {sel}")
+                            # Click and type like a human
+                            await search_input.click()
+                            await human_delay(page, 300, 600)
+                            await search_input.fill("")
+                            await human_delay(page, 200, 400)
+                            # Type character by character for realism
+                            await search_input.type(query, delay=50)
+                            await human_delay(page, 500, 1000)
+                            # Submit with Enter
+                            await search_input.press("Enter")
+                            search_submitted = True
+                            logger.info(f"[SIG] Search submitted via search bar")
+                            break
+                    except Exception:
+                        continue
+
+                if not search_submitted:
+                    # Fallback: navigate directly to search URL
+                    logger.info(f"[SIG] No search input found, navigating to {search_url}")
+                    await page.goto(search_url, wait_until="domcontentloaded")
+
+                # Wait for results to load
+                await human_delay(page, 3000, 5000)
                 await human_scroll(page)
 
-                # Wait for product list to load
                 try:
                     await page.wait_for_load_state("networkidle", timeout=15000)
                 except Exception:
                     pass
 
-                # Extra wait for any lazy-loaded content
-                await human_delay(page, 1000, 2000)
+                # Extra wait for JS rendering
+                await human_delay(page, 2000, 3000)
 
-                # Log the current URL (in case of redirect)
+                # Log current state for debugging
                 current_url = page.url
-                logger.info(f"[SIG] Current URL after navigation: {current_url}")
+                title = await page.title()
+                logger.info(f"[SIG] Page URL: {current_url}")
+                logger.info(f"[SIG] Page title: {title}")
 
-                # Check if we got products from API interception
+                # Check API interception results first
                 if api_products:
-                    logger.info(f"[SIG] Got {len(api_products)} products from API interception")
+                    logger.info(f"[SIG] {len(api_products)} products from API interception")
                     products.extend(api_products)
 
                 if not products:
                     # Try CSS selectors for product cards
-                    selectors = [
-                        "[class*='product-card']",
-                        "[class*='product-item']",
-                        "[class*='product-tile']",
-                        "[class*='ProductCard']",
-                        "[data-product]",
-                        "[data-productid]",
-                        "[data-product-id]",
-                        ".product",
-                        "[class*='search-result'] [class*='item']",
-                        "article[class*='product']",
-                        "[class*='listing'] [class*='item']",
-                        "[class*='productBox']",
-                        "[class*='product-box']",
-                        "[class*='prod-']",
-                        "[class*='search'] [class*='row']",
-                        "[class*='search'] [class*='col']",
-                    ]
-
-                    product_elements = []
-                    used_selector = ""
-                    for sel in selectors:
-                        elements = await page.locator(sel).all()
-                        if elements:
-                            product_elements = elements
-                            used_selector = sel
-                            break
-
-                    if product_elements:
-                        logger.info(f"[SIG] Found {len(product_elements)} products with selector '{used_selector}'")
-                        for elem in product_elements[:30]:
-                            try:
-                                product = await self._extract_product(elem, page)
-                                if product and product.get("nazwa"):
-                                    products.append(product)
-                            except Exception as e:
-                                logger.debug(f"[SIG] Error extracting product: {e}")
-                                continue
+                    products = await self._try_css_selectors(page)
 
                 if not products:
                     # Fallback: extract from full page HTML
-                    logger.info("[SIG] No products via selectors, trying HTML extraction")
                     content = await page.content()
-                    # Log a snippet of the page for debugging
-                    logger.info(f"[SIG] Page HTML length: {len(content)}")
-                    title_match = re.search(r"<title>(.*?)</title>", content, re.IGNORECASE)
-                    if title_match:
-                        logger.info(f"[SIG] Page title: {title_match.group(1)}")
+                    logger.info(f"[SIG] HTML length: {len(content)}")
                     products = await self._extract_from_html(content, query)
 
                 if not products:
-                    # Last resort: look for any <a> links matching SIG product URL pattern
-                    logger.info("[SIG] Trying direct link scan for product URLs")
-                    all_links = await page.locator("a[href]").all()
-                    logger.info(f"[SIG] Total links on page: {len(all_links)}")
-                    for link_el in all_links[:200]:
-                        try:
-                            href = await link_el.get_attribute("href") or ""
-                            if not SIG_PRODUCT_URL_RE.search(href):
-                                continue
-                            text = (await link_el.inner_text()).strip()
-                            if not text or len(text) < 5:
-                                continue
-                            url = href if href.startswith("http") else self.base_url + href
+                    # Last resort: scan all links for product URL pattern
+                    products = await self._scan_links(page)
 
-                            # Walk up the DOM to find price/image
-                            price = ""
-                            image = ""
-                            # Try parent, grandparent, etc.
-                            current = link_el
-                            for _ in range(5):
-                                parent = current.locator("..")
-                                try:
-                                    price_el = parent.locator(
-                                        "[class*='price'], [class*='cena'], [class*='Price']"
-                                    ).first
-                                    if await price_el.is_visible(timeout=200):
-                                        price = (await price_el.inner_text()).strip()
-                                        break
-                                except Exception:
-                                    pass
-                                current = parent
-
-                            current = link_el
-                            for _ in range(5):
-                                parent = current.locator("..")
-                                try:
-                                    img = parent.locator("img").first
-                                    src = await img.get_attribute("src") or await img.get_attribute("data-src") or ""
-                                    if src:
-                                        image = src if src.startswith("http") else self.base_url + src
-                                        break
-                                except Exception:
-                                    pass
-                                current = parent
-
-                            products.append(self._build_product(
-                                nazwa=text[:200],
-                                cena=self._normalize_price(price),
-                                zrodlo=self.name,
-                                url=url,
-                                zdjecie=image,
-                            ))
-                        except Exception:
-                            continue
-
-                # Scroll down for lazy-loaded content
+                # Scroll for lazy-loaded content
                 for _ in range(3):
                     await human_scroll(page)
                     await human_delay(page, 500, 1000)
@@ -229,25 +180,119 @@ class SigScraper(BaseScraper):
         logger.info(f"[SIG] Scraped {len(products)} products total")
         return products
 
+    async def _try_css_selectors(self, page) -> list[dict]:
+        """Try to find product cards using various CSS selectors."""
+        selectors = [
+            "[class*='product-card']",
+            "[class*='product-item']",
+            "[class*='product-tile']",
+            "[class*='ProductCard']",
+            "[data-product]",
+            "[data-productid]",
+            "[data-product-id]",
+            ".product",
+            "[class*='search-result'] [class*='item']",
+            "article[class*='product']",
+            "[class*='listing'] [class*='item']",
+            "[class*='productBox']",
+            "[class*='product-box']",
+            "[class*='prod-']",
+            "[class*='search'] [class*='row'] > div",
+            "[class*='result'] [class*='card']",
+        ]
+
+        for sel in selectors:
+            elements = await page.locator(sel).all()
+            if elements:
+                logger.info(f"[SIG] Found {len(elements)} products with '{sel}'")
+                products = []
+                for elem in elements[:30]:
+                    try:
+                        product = await self._extract_product(elem)
+                        if product and product.get("nazwa"):
+                            products.append(product)
+                    except Exception:
+                        continue
+                if products:
+                    return products
+
+        return []
+
+    async def _scan_links(self, page) -> list[dict]:
+        """Scan all links on page for SIG product URL patterns."""
+        products = []
+        all_links = await page.locator("a[href]").all()
+        logger.info(f"[SIG] Scanning {len(all_links)} links for product URLs")
+
+        for link_el in all_links[:200]:
+            try:
+                href = await link_el.get_attribute("href") or ""
+                if not SIG_PRODUCT_URL_RE.search(href):
+                    continue
+                text = (await link_el.inner_text()).strip()
+                if not text or len(text) < 5:
+                    continue
+                url = href if href.startswith("http") else self.base_url + href
+
+                # Walk up DOM to find price/image
+                price = ""
+                image = ""
+                current = link_el
+                for _ in range(5):
+                    parent = current.locator("..")
+                    try:
+                        price_el = parent.locator(
+                            "[class*='price'], [class*='cena'], [class*='Price']"
+                        ).first
+                        if await price_el.is_visible(timeout=200):
+                            price = (await price_el.inner_text()).strip()
+                            break
+                    except Exception:
+                        pass
+                    current = parent
+
+                current = link_el
+                for _ in range(5):
+                    parent = current.locator("..")
+                    try:
+                        img = parent.locator("img").first
+                        src = await img.get_attribute("src") or await img.get_attribute("data-src") or ""
+                        if src:
+                            image = src if src.startswith("http") else self.base_url + src
+                            break
+                    except Exception:
+                        pass
+                    current = parent
+
+                products.append(self._build_product(
+                    nazwa=text[:200],
+                    cena=self._normalize_price(price),
+                    zrodlo=self.name,
+                    url=url,
+                    zdjecie=image,
+                ))
+            except Exception:
+                continue
+
+        return products
+
     def _extract_from_api(self, data) -> list[dict]:
         """Extract products from intercepted API JSON response."""
         products = []
 
-        # Handle different API response structures
         items = []
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
-            # Try common keys for product lists
             for key in ["products", "items", "results", "data", "hits",
-                        "produkty", "wyniki", "content", "records"]:
+                        "produkty", "wyniki", "content", "records",
+                        "searchResults", "productList"]:
                 if key in data:
                     val = data[key]
                     if isinstance(val, list):
                         items = val
                         break
                     elif isinstance(val, dict):
-                        # Nested: data.products.items etc.
                         for subkey in ["products", "items", "results", "hits", "content"]:
                             if subkey in val and isinstance(val[subkey], list):
                                 items = val[subkey]
@@ -259,7 +304,6 @@ class SigScraper(BaseScraper):
             if not isinstance(item, dict):
                 continue
 
-            # Try to extract name
             name = ""
             for key in ["name", "nazwa", "title", "productName", "label",
                         "description", "shortName", "displayName"]:
@@ -271,7 +315,6 @@ class SigScraper(BaseScraper):
             if not name:
                 continue
 
-            # Price
             price = ""
             for key in ["price", "cena", "unitPrice", "grossPrice", "netPrice",
                         "currentPrice", "finalPrice", "priceValue"]:
@@ -294,7 +337,6 @@ class SigScraper(BaseScraper):
                     if price:
                         break
 
-            # URL
             url = ""
             for key in ["url", "link", "href", "slug", "productUrl", "seoUrl"]:
                 if key in item and isinstance(item[key], str):
@@ -303,7 +345,6 @@ class SigScraper(BaseScraper):
                         url = self.base_url + ("/" + url).replace("//", "/")
                     break
 
-            # Image
             image = ""
             for key in ["image", "imageUrl", "img", "thumbnail", "photo",
                         "zdjecie", "mainImage", "pictureUrl"]:
@@ -334,10 +375,9 @@ class SigScraper(BaseScraper):
 
         return products
 
-    async def _extract_product(self, elem, page) -> dict | None:
+    async def _extract_product(self, elem) -> dict | None:
         """Extract product data from a card element."""
         try:
-            # Name
             name = ""
             for sel in ["a[class*='name']", "h2", "h3", "a[class*='title']",
                         "[class*='name']", "[class*='title']", "a"]:
@@ -353,7 +393,6 @@ class SigScraper(BaseScraper):
             if not name:
                 return None
 
-            # URL
             url = ""
             try:
                 link = elem.locator("a").first
@@ -363,7 +402,6 @@ class SigScraper(BaseScraper):
             except Exception:
                 pass
 
-            # Price
             price = ""
             for sel in ["[class*='price']", "[class*='Price']", "[class*='cena']",
                         "span[class*='amount']", "[data-price]"]:
@@ -376,7 +414,6 @@ class SigScraper(BaseScraper):
                 except Exception:
                     continue
 
-            # Image
             image = ""
             try:
                 img = elem.locator("img").first
@@ -386,7 +423,6 @@ class SigScraper(BaseScraper):
             except Exception:
                 pass
 
-            # Availability
             availability = ""
             try:
                 avail_el = elem.locator("[class*='avail'], [class*='stock'], [class*='dostep']").first
@@ -426,7 +462,6 @@ class SigScraper(BaseScraper):
 
             url = href if href.startswith("http") else self.base_url + href
 
-            # Walk up parents to find price and image
             price = ""
             img = ""
             parent = a.find_parent()
@@ -459,7 +494,7 @@ class SigScraper(BaseScraper):
                 zdjecie=img,
             ))
 
-        # Strategy 2: Look for JSON-LD structured data
+        # Strategy 2: JSON-LD structured data
         if not products:
             for script in soup.find_all("script", type="application/ld+json"):
                 try:
@@ -476,13 +511,12 @@ class SigScraper(BaseScraper):
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        # Strategy 3: Look for inline JSON data (e.g. __NEXT_DATA__, window.data, etc.)
+        # Strategy 3: Inline JSON data (__NEXT_DATA__, window.data, etc.)
         if not products:
             for script in soup.find_all("script"):
                 if not script.string:
                     continue
                 text = script.string
-                # Try to find JSON objects with product data
                 for pattern in [
                     r'(?:__NEXT_DATA__|__NUXT__|window\.__data|window\.products)\s*=\s*(\{.+?\});',
                     r'JSON\.parse\([\'"](.+?)[\'"]\)',
@@ -491,7 +525,6 @@ class SigScraper(BaseScraper):
                     if match:
                         try:
                             raw = match.group(1)
-                            # Unescape if needed
                             raw = raw.encode().decode("unicode_escape") if "\\u" in raw else raw
                             data = json.loads(raw)
                             extracted = self._extract_from_api(data)
