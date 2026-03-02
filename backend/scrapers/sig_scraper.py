@@ -1,21 +1,61 @@
 """Scraper for sig.pl - building materials store.
 
-Uses Google site-search to find SIG products because sig.pl is
-protected by Cloudflare which blocks headless browsers.
+Uses DuckDuckGo site-search via HTTP to find SIG products because
+sig.pl is protected by Cloudflare which blocks headless browsers.
+Uses sync HTTP POST in a subprocess to avoid bot detection.
 """
 
 import json
 import logging
 import re
-from urllib.parse import quote_plus
+import subprocess
+import sys
+from urllib.parse import unquote, urlparse, parse_qs
 
 from backend.scrapers.base import BaseScraper
-from backend.utils.anti_detect import human_delay, human_scroll, human_mouse_move
 
 logger = logging.getLogger(__name__)
 
-# Pattern for SIG product URLs: /some-product-slug,p123456
-SIG_PRODUCT_URL_RE = re.compile(r",p\d{4,}")
+
+# Standalone script that runs in a subprocess to fetch DDG results
+_DDG_FETCH_SCRIPT = '''
+import json
+import sys
+import httpx
+from bs4 import BeautifulSoup
+
+query = sys.argv[1]
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8",
+    "Referer": "https://duckduckgo.com/",
+}
+
+try:
+    resp = httpx.post(
+        "https://html.duckduckgo.com/html/",
+        data={"q": query, "b": "", "kl": "pl-pl"},
+        headers=headers,
+        follow_redirects=True,
+        timeout=15,
+    )
+    soup = BeautifulSoup(resp.text, "lxml")
+    results = []
+    for r in soup.select(".result"):
+        title_el = r.select_one(".result__a")
+        snippet_el = r.select_one(".result__snippet")
+        if not title_el:
+            continue
+        results.append({
+            "title": title_el.get_text(strip=True),
+            "href": title_el.get("href", ""),
+            "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+        })
+    print(json.dumps(results))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+'''
 
 
 class SigScraper(BaseScraper):
@@ -23,90 +63,44 @@ class SigScraper(BaseScraper):
     base_url = "https://www.sig.pl"
 
     async def search(self, query: str, engine) -> list[dict]:
-        """Search SIG products via Google site-search to bypass Cloudflare."""
+        """Search SIG products via DuckDuckGo to bypass Cloudflare."""
         products = []
-
-        # Use Google to search sig.pl products
-        google_query = f"site:sig.pl {query}"
-        google_url = (
-            f"https://www.google.pl/search?"
-            f"q={quote_plus(google_query)}&hl=pl&gl=pl&num=30"
-        )
+        ddg_query = f"site:sig.pl {query}"
 
         try:
-            async with engine.new_page_with_images() as page:
-                logger.info(f"[SIG] Searching via Google: {google_query}")
+            logger.info(f"[SIG] Searching DuckDuckGo: {ddg_query}")
 
-                # Go to Google first
-                await page.goto("https://www.google.pl", wait_until="domcontentloaded")
-                await human_delay(page, 800, 1500)
+            # Run HTTP fetch in a subprocess to avoid async bot detection
+            result = subprocess.run(
+                [sys.executable, "-c", _DDG_FETCH_SCRIPT, ddg_query],
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
 
-                # Handle Google cookie consent
+            if result.returncode != 0:
+                logger.error(f"[SIG] Subprocess error: {result.stderr[:200]}")
+                return []
+
+            data = json.loads(result.stdout)
+
+            if isinstance(data, dict) and "error" in data:
+                logger.error(f"[SIG] Fetch error: {data['error']}")
+                return []
+
+            logger.info(f"[SIG] DuckDuckGo returned {len(data)} results")
+
+            for item in data:
                 try:
-                    consent = page.locator(
-                        "button:has-text('Zaakceptuj wszystko'), "
-                        "button:has-text('Accept all'), "
-                        "#L2AGLb"
-                    ).first
-                    if await consent.is_visible(timeout=3000):
-                        await consent.click()
-                        await human_delay(page, 500, 1000)
-                except Exception:
-                    pass
+                    product = self._parse_result(item)
+                    if product:
+                        products.append(product)
+                except Exception as e:
+                    logger.debug(f"[SIG] Error parsing result: {e}")
+                    continue
 
-                await human_mouse_move(page)
-
-                # Navigate to Google search results
-                await page.goto(google_url, wait_until="domcontentloaded")
-                await human_delay(page, 2000, 3500)
-                await human_scroll(page)
-
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=10000)
-                except Exception:
-                    pass
-
-                current_url = page.url
-                logger.info(f"[SIG] Google results page: {current_url}")
-
-                # Extract Google search results
-                # Try multiple selectors for Google result items
-                result_selectors = [
-                    "#search .g",
-                    "#rso .g",
-                    "[data-hveid] .g",
-                    "#search [data-sokoban-container]",
-                    ".MjjYud",
-                ]
-
-                result_elements = []
-                for sel in result_selectors:
-                    elements = await page.locator(sel).all()
-                    if elements:
-                        result_elements = elements
-                        logger.info(f"[SIG] Found {len(elements)} Google results with '{sel}'")
-                        break
-
-                if not result_elements:
-                    # Fallback: extract from HTML
-                    logger.info("[SIG] No results via selectors, trying HTML extraction")
-                    content = await page.content()
-                    products = self._extract_from_google_html(content)
-                else:
-                    for elem in result_elements[:30]:
-                        try:
-                            product = await self._extract_google_result(elem)
-                            if product:
-                                products.append(product)
-                        except Exception as e:
-                            logger.debug(f"[SIG] Error extracting result: {e}")
-                            continue
-
-                # Scroll for more results
-                for _ in range(2):
-                    await human_scroll(page)
-                    await human_delay(page, 500, 1000)
-
+        except subprocess.TimeoutExpired:
+            logger.error("[SIG] DuckDuckGo request timed out")
         except Exception as e:
             logger.error(f"[SIG] Scraping error: {e}")
 
@@ -122,119 +116,58 @@ class SigScraper(BaseScraper):
         logger.info(f"[SIG] Scraped {len(products)} products total")
         return products
 
-    async def _extract_google_result(self, elem) -> dict | None:
-        """Extract product info from a Google search result."""
-        try:
-            # Get the link
-            link = elem.locator("a").first
-            href = await link.get_attribute("href") or ""
+    def _parse_result(self, item: dict) -> dict | None:
+        """Parse a DuckDuckGo result dict into a product."""
+        title = item.get("title", "")
+        raw_href = item.get("href", "")
+        snippet = item.get("snippet", "")
 
-            # Only keep sig.pl product links
-            if "sig.pl" not in href:
-                return None
-
-            # Get title
-            title = ""
-            for sel in ["h3", "h2", "[class*='title']"]:
-                try:
-                    title_el = elem.locator(sel).first
-                    if await title_el.is_visible(timeout=500):
-                        title = (await title_el.inner_text()).strip()
-                        if title:
-                            break
-                except Exception:
-                    continue
-
-            if not title:
-                return None
-
-            # Clean up title - remove " | SIG" or similar suffixes
-            title = re.sub(r'\s*[|–-]\s*SIG.*$', '', title).strip()
-            title = re.sub(r'\s*-\s*sig\.pl.*$', '', title, flags=re.IGNORECASE).strip()
-
-            # Get snippet text (may contain price or description)
-            snippet = ""
-            try:
-                # Google snippet is usually in a div after the link
-                snippet_el = elem.locator(
-                    "[data-sncf], [class*='VwiC3b'], .IsZvec, [class*='snippet']"
-                ).first
-                if await snippet_el.is_visible(timeout=500):
-                    snippet = (await snippet_el.inner_text()).strip()
-            except Exception:
-                pass
-
-            # Try to extract price from snippet
-            price = ""
-            if snippet:
-                price_match = re.search(
-                    r'(\d[\d\s]*[.,]\d{2})\s*(?:zł|PLN|pln)',
-                    snippet
-                )
-                if price_match:
-                    price = price_match.group(1)
-
-            url = href if href.startswith("http") else self.base_url + href
-
-            return self._build_product(
-                nazwa=title,
-                cena=self._normalize_price(price),
-                zrodlo=self.name,
-                url=url,
-                dostepnosc=snippet[:150] if snippet else "",
-            )
-
-        except Exception as e:
-            logger.debug(f"[SIG] Google result extraction error: {e}")
+        if not title:
             return None
 
-    def _extract_from_google_html(self, html: str) -> list[dict]:
-        """Fallback: extract SIG results from Google HTML."""
-        from bs4 import BeautifulSoup
+        # Extract actual URL
+        url = self._extract_ddg_url(raw_href)
 
-        products = []
-        soup = BeautifulSoup(html, "lxml")
+        # Only keep sig.pl links
+        if "sig.pl" not in url:
+            return None
 
-        # Find all links pointing to sig.pl
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "sig.pl" not in href:
-                continue
+        # Clean title - remove " - SIG" or " | SIG" suffix
+        title = re.sub(r'\s*[-|–]\s*SIG.*$', '', title).strip()
 
-            # Look for h3 inside the link (Google result title)
-            h3 = a.find("h3")
-            if not h3:
-                continue
+        # Try to extract price from snippet
+        price = ""
+        if snippet:
+            price_match = re.search(
+                r'(\d[\d\s]*[.,]\d{2})\s*(?:zł|PLN|pln)',
+                snippet,
+            )
+            if price_match:
+                price = price_match.group(1)
 
-            title = h3.get_text(strip=True)
-            if not title:
-                continue
+        return self._build_product(
+            nazwa=title,
+            cena=self._normalize_price(price),
+            zrodlo=self.name,
+            url=url,
+            dostepnosc=snippet[:200] if snippet else "",
+        )
 
-            # Clean title
-            title = re.sub(r'\s*[|–-]\s*SIG.*$', '', title).strip()
-            title = re.sub(r'\s*-\s*sig\.pl.*$', '', title, flags=re.IGNORECASE).strip()
+    def _extract_ddg_url(self, href: str) -> str:
+        """Extract the real URL from a DuckDuckGo redirect link."""
+        if not href:
+            return ""
 
-            url = href if href.startswith("http") else href
+        # DuckDuckGo wraps URLs: //duckduckgo.com/l/?uddg=https%3A%2F%2F...
+        if "uddg=" in href:
+            parsed = urlparse(href)
+            params = parse_qs(parsed.query)
+            if "uddg" in params:
+                return unquote(params["uddg"][0])
 
-            # Try to find snippet (price info)
-            price = ""
-            parent = a.find_parent()
-            if parent:
-                parent = parent.find_parent()
-            if parent:
-                text = parent.get_text()
-                price_match = re.search(
-                    r'(\d[\d\s]*[.,]\d{2})\s*(?:zł|PLN|pln)',
-                    text
-                )
-                if price_match:
-                    price = price_match.group(1)
+        if href.startswith("http"):
+            return href
+        if href.startswith("//"):
+            return "https:" + href
 
-            products.append(self._build_product(
-                nazwa=title[:200],
-                cena=self._normalize_price(price),
-                zrodlo=self.name,
-                url=url,
-            ))
-
-        return products[:30]
+        return href
