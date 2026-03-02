@@ -1,12 +1,16 @@
 """Scraper for sig.pl - building materials store."""
 
 import logging
+import re
 from urllib.parse import quote_plus
 
 from backend.scrapers.base import BaseScraper
 from backend.utils.anti_detect import human_delay, human_scroll, human_mouse_move
 
 logger = logging.getLogger(__name__)
+
+# Pattern for SIG product URLs: /some-product-slug,p123456
+SIG_PRODUCT_URL_RE = re.compile(r",p\d{4,}")
 
 
 class SigScraper(BaseScraper):
@@ -15,7 +19,7 @@ class SigScraper(BaseScraper):
 
     async def search(self, query: str, engine) -> list[dict]:
         products = []
-        search_url = f"{self.base_url}/search?q={quote_plus(query)}"
+        search_url = f"{self.base_url}/szukaj-produktow?searchquery={quote_plus(query)}"
 
         try:
             async with engine.new_page_with_images() as page:
@@ -59,10 +63,14 @@ class SigScraper(BaseScraper):
                     "[class*='product-tile']",
                     "[class*='ProductCard']",
                     "[data-product]",
+                    "[data-productid]",
                     ".product",
                     "[class*='search-result'] [class*='item']",
                     "article[class*='product']",
                     "[class*='listing'] [class*='item']",
+                    "[class*='productBox']",
+                    "[class*='product-box']",
+                    "[class*='prod-']",
                 ]
 
                 product_elements = []
@@ -74,22 +82,68 @@ class SigScraper(BaseScraper):
                         used_selector = sel
                         break
 
-                if not product_elements:
-                    # Try to extract from page content directly
-                    logger.info("[SIG] No product cards found with known selectors, trying generic extraction")
+                if product_elements:
+                    logger.info(f"[SIG] Found {len(product_elements)} products with selector '{used_selector}'")
+                    for elem in product_elements[:30]:
+                        try:
+                            product = await self._extract_product(elem, page)
+                            if product and product.get("nazwa"):
+                                products.append(product)
+                        except Exception as e:
+                            logger.debug(f"[SIG] Error extracting product: {e}")
+                            continue
+
+                if not products:
+                    # Fallback: extract product links from HTML by URL pattern
+                    logger.info("[SIG] No products via selectors, trying HTML extraction")
                     content = await page.content()
-                    return await self._extract_from_html(content, query)
+                    products = await self._extract_from_html(content, query)
 
-                logger.info(f"[SIG] Found {len(product_elements)} products with selector '{used_selector}'")
+                if not products:
+                    # Last resort: look for any links matching SIG product URL pattern
+                    logger.info("[SIG] Trying product URL pattern matching")
+                    all_links = await page.locator("a[href]").all()
+                    for link in all_links[:100]:
+                        try:
+                            href = await link.get_attribute("href") or ""
+                            if not SIG_PRODUCT_URL_RE.search(href):
+                                continue
+                            text = (await link.inner_text()).strip()
+                            if not text or len(text) < 5:
+                                continue
+                            url = href if href.startswith("http") else self.base_url + href
 
-                for elem in product_elements[:30]:
-                    try:
-                        product = await self._extract_product(elem, page)
-                        if product and product.get("nazwa"):
-                            products.append(product)
-                    except Exception as e:
-                        logger.debug(f"[SIG] Error extracting product: {e}")
-                        continue
+                            # Try to find price near the link
+                            parent = link.locator("..")
+                            price = ""
+                            try:
+                                price_el = parent.locator(
+                                    "[class*='price'], [class*='cena'], [class*='Price']"
+                                ).first
+                                if await price_el.is_visible(timeout=300):
+                                    price = (await price_el.inner_text()).strip()
+                            except Exception:
+                                pass
+
+                            # Try to find image near the link
+                            image = ""
+                            try:
+                                img = parent.locator("img").first
+                                image = await img.get_attribute("src") or await img.get_attribute("data-src") or ""
+                                if image and not image.startswith("http"):
+                                    image = self.base_url + image
+                            except Exception:
+                                pass
+
+                            products.append(self._build_product(
+                                nazwa=text[:200],
+                                cena=self._normalize_price(price),
+                                zrodlo=self.name,
+                                url=url,
+                                zdjecie=image,
+                            ))
+                        except Exception:
+                            continue
 
                 # Scroll down and check for more products
                 for _ in range(3):
@@ -98,6 +152,17 @@ class SigScraper(BaseScraper):
 
         except Exception as e:
             logger.error(f"[SIG] Scraping error: {e}")
+
+        # Deduplicate by URL
+        seen_urls = set()
+        unique = []
+        for p in products:
+            if p["url"] and p["url"] not in seen_urls:
+                seen_urls.add(p["url"])
+                unique.append(p)
+            elif not p["url"]:
+                unique.append(p)
+        products = unique[:30]
 
         logger.info(f"[SIG] Scraped {len(products)} products")
         return products
@@ -133,8 +198,8 @@ class SigScraper(BaseScraper):
 
             # Price
             price = ""
-            for sel in ["[class*='price']", "[class*='Price']", "span[class*='amount']",
-                        "[data-price]"]:
+            for sel in ["[class*='price']", "[class*='Price']", "[class*='cena']",
+                        "span[class*='amount']", "[data-price]"]:
                 try:
                     price_el = elem.locator(sel).first
                     if await price_el.is_visible(timeout=500):
@@ -157,7 +222,7 @@ class SigScraper(BaseScraper):
             # Availability
             availability = ""
             try:
-                avail_el = elem.locator("[class*='avail'], [class*='stock']").first
+                avail_el = elem.locator("[class*='avail'], [class*='stock'], [class*='dostep']").first
                 if await avail_el.is_visible(timeout=500):
                     availability = (await avail_el.inner_text()).strip()
             except Exception:
@@ -182,25 +247,88 @@ class SigScraper(BaseScraper):
         products = []
         soup = BeautifulSoup(html, "lxml")
 
-        # Look for any links that might be products
-        for a in soup.find_all("a", href=True):
+        # Strategy 1: Find product links by SIG URL pattern (,p123456)
+        for a in soup.find_all("a", href=SIG_PRODUCT_URL_RE):
             text = a.get_text(strip=True)
             href = a["href"]
-            if query.split()[0].lower() in text.lower() and len(text) > 10:
+            if not text or len(text) < 5:
+                continue
+
+            url = href if href.startswith("http") else self.base_url + href
+
+            # Try to find a price nearby
+            parent = a.find_parent()
+            price = ""
+            if parent:
+                # Go up a few levels to find price
+                for _ in range(4):
+                    price_el = parent.find(
+                        class_=lambda c: c and any(
+                            x in c.lower() for x in ["price", "cena"]
+                        )
+                    )
+                    if price_el:
+                        price = price_el.get_text(strip=True)
+                        break
+                    parent = parent.find_parent()
+                    if not parent:
+                        break
+
+            img = ""
+            # Go back to the original parent
+            parent = a.find_parent()
+            if parent:
+                for _ in range(4):
+                    img_el = parent.find("img")
+                    if img_el:
+                        img = img_el.get("src", "") or img_el.get("data-src", "")
+                        if img and not img.startswith("http"):
+                            img = self.base_url + img
+                        break
+                    parent = parent.find_parent()
+                    if not parent:
+                        break
+
+            products.append(self._build_product(
+                nazwa=text[:200],
+                cena=self._normalize_price(price),
+                zrodlo=self.name,
+                url=url,
+                zdjecie=img,
+            ))
+
+        # Strategy 2: If no products by URL pattern, try query-based matching
+        if not products:
+            query_words = [w.lower() for w in query.split() if len(w) > 2]
+            for a in soup.find_all("a", href=True):
+                text = a.get_text(strip=True)
+                href = a["href"]
+                if len(text) < 10:
+                    continue
+                text_lower = text.lower()
+                # At least 2 query words must match
+                matches = sum(1 for w in query_words if w in text_lower)
+                if matches < min(2, len(query_words)):
+                    continue
+
                 url = href if href.startswith("http") else self.base_url + href
 
-                # Try to find a price nearby
                 parent = a.find_parent()
                 price = ""
                 if parent:
-                    price_el = parent.find(class_=lambda c: c and "price" in c.lower()) if parent else None
+                    price_el = parent.find(
+                        class_=lambda c: c and any(
+                            x in c.lower() for x in ["price", "cena"]
+                        )
+                    )
                     if price_el:
                         price = price_el.get_text(strip=True)
 
                 img = ""
-                img_el = parent.find("img") if parent else None
-                if img_el:
-                    img = img_el.get("src", "") or img_el.get("data-src", "")
+                if parent:
+                    img_el = parent.find("img")
+                    if img_el:
+                        img = img_el.get("src", "") or img_el.get("data-src", "")
 
                 products.append(self._build_product(
                     nazwa=text[:200],
@@ -210,4 +338,13 @@ class SigScraper(BaseScraper):
                     zdjecie=img,
                 ))
 
-        return products[:30]
+        # Deduplicate
+        seen = set()
+        unique = []
+        for p in products:
+            key = p["url"] or p["nazwa"]
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+
+        return unique[:30]

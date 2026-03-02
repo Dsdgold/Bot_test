@@ -15,7 +15,7 @@ class LeroyMerlinScraper(BaseScraper):
 
     async def search(self, query: str, engine) -> list[dict]:
         products = []
-        search_url = f"{self.base_url}/szukaj/{quote_plus(query)}/"
+        search_url = f"{self.base_url}/search?q={quote_plus(query)}"
 
         try:
             async with engine.new_page_with_images() as page:
