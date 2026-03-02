@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Scraper Bot</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1>ScraperBot</h1>
+                        <span class="version">v1.0</span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-tab="search">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    Szukaj
+                </button>
+                <button class="nav-btn" data-tab="history">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 8v4l3 3"></path>
+                        <circle cx="12" cy="12" r="10"></circle>
+                    </svg>
+                    Historia
+                </button>
+                <button class="nav-btn" data-tab="exports">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Eksporty CSV
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-indicator" id="engineStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Silnik gotowy</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Search Tab -->
+            <div class="tab-content active" id="tab-search">
+                <div class="search-section">
+                    <div class="search-header">
+                        <h2>Wyszukaj produkty</h2>
+                        <p>Wpisz nazwę produktu, a bot przeszuka wybrane źródła i zbierze dane o cenach</p>
+                    </div>
+
+                    <div class="search-box">
+                        <div class="search-input-wrapper">
+                            <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                            <input type="text" id="searchInput" placeholder="np. farba dekoral 1l, panele podłogowe, klej montażowy..." autocomplete="off">
+                            <button class="search-btn" id="searchBtn" onclick="startSearch()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="m5 12 7-7 7 7"></path>
+                                    <path d="M12 19V5"></path>
+                                </svg>
+                                Szukaj
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Source selection -->
+                    <div class="sources-section">
+                        <div class="sources-header">
+                            <h3>Źródła danych</h3>
+                            <button class="select-all-btn" onclick="toggleAllSources()">Zaznacz wszystkie</button>
+                        </div>
+                        <div class="sources-grid" id="sourcesGrid">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="results-section" id="resultsSection" style="display: none;">
+                    <!-- Progress -->
+                    <div class="progress-bar-container" id="progressContainer">
+                        <div class="progress-info">
+                            <span id="progressText">Szukanie...</span>
+                            <span id="progressCount">0 / 0</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="current-source" id="currentSource"></div>
+                    </div>
+
+                    <!-- Stats -->
+                    <div class="results-stats" id="resultsStats" style="display: none;">
+                        <div class="stat-card">
+                            <div class="stat-value" id="statTotal">0</div>
+                            <div class="stat-label">Znalezionych produktów</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statSources">0</div>
+                            <div class="stat-label">Przeszukanych źródeł</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statCheapest">-</div>
+                            <div class="stat-label">Najniższa cena</div>
+                        </div>
+                        <div class="stat-card action" onclick="downloadCSV()">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            <div class="stat-label">Pobierz CSV</div>
+                        </div>
+                    </div>
+
+                    <!-- Results Table -->
+                    <div class="results-table-container" id="tableContainer" style="display: none;">
+                        <div class="table-header">
+                            <h3>Wyniki wyszukiwania</h3>
+                            <div class="table-actions">
+                                <input type="text" id="filterInput" placeholder="Filtruj wyniki..." oninput="filterResults()">
+                                <select id="sortSelect" onchange="sortResults()">
+                                    <option value="price_asc">Cena: rosnąco</option>
+                                    <option value="price_desc">Cena: malejąco</option>
+                                    <option value="name_asc">Nazwa: A-Z</option>
+                                    <option value="name_desc">Nazwa: Z-A</option>
+                                    <option value="source">Źródło</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th class="col-img">Zdjęcie</th>
+                                        <th class="col-name">Nazwa produktu</th>
+                                        <th class="col-price">Cena</th>
+                                        <th class="col-source">Źródło</th>
+                                        <th class="col-avail">Dostępność</th>
+                                        <th class="col-rating">Ocena</th>
+                                        <th class="col-actions">Akcje</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div class="tab-content" id="tab-history">
+                <div class="tab-header">
+                    <h2>Historia wyszukiwań</h2>
+                    <p>Twoje ostatnie wyszukiwania i ich wyniki</p>
+                </div>
+                <div class="history-list" id="historyList">
+                    <div class="empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 8v4l3 3"></path>
+                            <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        <p>Brak historii wyszukiwań</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exports Tab -->
+            <div class="tab-content" id="tab-exports">
+                <div class="tab-header">
+                    <h2>Eksporty CSV</h2>
+                    <p>Pobierz lub zarządzaj wyeksportowanymi plikami</p>
+                </div>
+                <div class="exports-list" id="exportsList">
+                    <div class="empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                            <polyline points="13 2 13 9 20 9"></polyline>
+                        </svg>
+                        <p>Brak plików CSV</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
