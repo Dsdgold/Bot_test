@@ -29,11 +29,29 @@ class ScraperEngine:
         return cls._instance
 
     async def _init_browser(self):
+        logger.info("Starting browser engine...")
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
-            headless=True,
-            args=BROWSER_ARGS,
-        )
+        try:
+            self._browser = await asyncio.wait_for(
+                self._playwright.chromium.launch(
+                    headless=True,
+                    args=BROWSER_ARGS,
+                ),
+                timeout=30,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Browser launch timed out after 30s, retrying...")
+            # Kill any stale chromium processes and retry
+            import subprocess
+            subprocess.run(["pkill", "-f", "chromium"], capture_output=True)
+            await asyncio.sleep(2)
+            self._browser = await asyncio.wait_for(
+                self._playwright.chromium.launch(
+                    headless=True,
+                    args=BROWSER_ARGS,
+                ),
+                timeout=30,
+            )
         logger.info("Browser engine started")
 
     async def shutdown(self):
