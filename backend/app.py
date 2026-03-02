@@ -75,6 +75,7 @@ active_jobs: dict[str, dict] = {}
 class SearchRequest(BaseModel):
     query: str
     sources: list[str] | None = None  # None = all sources
+    max_results: int = 30  # max products per source (10-200)
 
 
 class SearchResponse(BaseModel):
@@ -132,6 +133,8 @@ async def start_search(request: SearchRequest):
     if not valid_sources:
         raise HTTPException(status_code=400, detail="No valid sources selected")
 
+    max_results = max(10, min(200, request.max_results))
+
     active_jobs[job_id] = {
         "job_id": job_id,
         "status": "pending",
@@ -144,6 +147,7 @@ async def start_search(request: SearchRequest):
         "csv_file": "",
         "errors": [],
         "sources": valid_sources,
+        "max_results": max_results,
         "started_at": datetime.now().isoformat(),
         "completed_at": "",
     }
@@ -363,6 +367,7 @@ async def _run_scraping_job(job_id: str):
 
     engine = await ScraperEngine.get_instance()
     all_products = []
+    max_results = job.get("max_results", 30)
 
     # Scrape sources with concurrency limit
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCRAPERS)
@@ -371,9 +376,9 @@ async def _run_scraping_job(job_id: str):
         async with semaphore:
             scraper = SCRAPERS[source_id]
             job["current_source"] = scraper.name
-            logger.info(f"[JOB {job_id}] Scraping {scraper.name}...")
+            logger.info(f"[JOB {job_id}] Scraping {scraper.name} (max {max_results})...")
             try:
-                products = await scraper.search(query, engine)
+                products = await scraper.search(query, engine, max_results=max_results)
                 return source_id, products, None
             except Exception as e:
                 logger.error(f"[JOB {job_id}] Error scraping {scraper.name}: {e}")

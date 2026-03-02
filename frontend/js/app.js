@@ -93,6 +93,8 @@ async function startSearch() {
         return;
     }
 
+    const maxResults = parseInt(document.getElementById('maxResults').value) || 30;
+
     const btn = document.getElementById('searchBtn');
     btn.disabled = true;
     btn.classList.add('loading');
@@ -101,7 +103,7 @@ async function startSearch() {
         const res = await fetch('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, sources }),
+            body: JSON.stringify({ query, sources, max_results: maxResults }),
         });
 
         if (!res.ok) throw new Error('Search request failed');

@@ -13,7 +13,7 @@ class LeroyMerlinScraper(BaseScraper):
     name = "leroymerlin.pl"
     base_url = "https://www.leroymerlin.pl"
 
-    async def search(self, query: str, engine) -> list[dict]:
+    async def search(self, query: str, engine, *, max_results: int = 30) -> list[dict]:
         products = []
         search_url = f"{self.base_url}/search?q={quote_plus(query)}"
 
@@ -66,7 +66,7 @@ class LeroyMerlinScraper(BaseScraper):
 
                 logger.info(f"[LEROY] Found {len(product_elements)} products")
 
-                for elem in product_elements[:30]:
+                for elem in product_elements[:max_results]:
                     try:
                         product = await self._extract_product(elem)
                         if product and product.get("nazwa"):
@@ -174,4 +174,4 @@ class LeroyMerlinScraper(BaseScraper):
                 zdjecie=img,
             ))
 
-        return products[:30]
+        return products[:max_results]

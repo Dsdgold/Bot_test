@@ -17,14 +17,18 @@ from backend.scrapers.base import BaseScraper
 logger = logging.getLogger(__name__)
 
 
-# Standalone script that runs in a subprocess to fetch DDG results
+# Standalone script that runs in a subprocess to fetch DDG results.
+# Supports pagination: argv[1]=query, argv[2]=max_pages
 _DDG_FETCH_SCRIPT = '''
 import json
 import sys
+import time
 import httpx
 from bs4 import BeautifulSoup
 
 query = sys.argv[1]
+max_pages = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -32,22 +36,13 @@ headers = {
     "Referer": "https://duckduckgo.com/",
 }
 
-try:
-    resp = httpx.post(
-        "https://html.duckduckgo.com/html/",
-        data={"q": query, "b": "", "kl": "pl-pl"},
-        headers=headers,
-        follow_redirects=True,
-        timeout=15,
-    )
-    soup = BeautifulSoup(resp.text, "lxml")
+def parse_results(soup):
     results = []
     for r in soup.select(".result"):
         title_el = r.select_one(".result__a")
         snippet_el = r.select_one(".result__snippet")
         if not title_el:
             continue
-        # Add spaces between bold tags to prevent word merging
         snippet_text = ""
         if snippet_el:
             for child in snippet_el.children:
@@ -60,7 +55,58 @@ try:
             "href": title_el.get("href", ""),
             "snippet": snippet_text,
         })
-    print(json.dumps(results))
+    return results
+
+def get_next_params(soup):
+    """Extract next page form data from DDG HTML pagination."""
+    form = soup.select_one("form.result--more__btn, input[name='s']")
+    if not form:
+        # Look for next button hidden inputs
+        inputs = soup.select(".result--more input[type='hidden'], .nav-link form input")
+        if not inputs:
+            return None
+    params = {}
+    for inp in soup.select("input[type='hidden']"):
+        name = inp.get("name")
+        val = inp.get("value", "")
+        if name:
+            params[name] = val
+    if "s" not in params:
+        return None
+    params["q"] = query
+    params["kl"] = "pl-pl"
+    return params
+
+try:
+    all_results = []
+    client = httpx.Client(headers=headers, follow_redirects=True, timeout=15)
+
+    # First page
+    resp = client.post(
+        "https://html.duckduckgo.com/html/",
+        data={"q": query, "b": "", "kl": "pl-pl"},
+    )
+    soup = BeautifulSoup(resp.text, "lxml")
+    page_results = parse_results(soup)
+    all_results.extend(page_results)
+
+    # Subsequent pages
+    for page_num in range(1, max_pages):
+        if not page_results:
+            break
+        next_params = get_next_params(soup)
+        if not next_params:
+            break
+        time.sleep(1.5)  # Rate limit delay
+        resp = client.post("https://html.duckduckgo.com/html/", data=next_params)
+        soup = BeautifulSoup(resp.text, "lxml")
+        page_results = parse_results(soup)
+        if not page_results:
+            break
+        all_results.extend(page_results)
+
+    client.close()
+    print(json.dumps(all_results))
 except Exception as e:
     print(json.dumps({"error": str(e)}))
 '''
@@ -70,20 +116,26 @@ class SigScraper(BaseScraper):
     name = "sig.pl"
     base_url = "https://www.sig.pl"
 
-    async def search(self, query: str, engine) -> list[dict]:
+    async def search(self, query: str, engine, *, max_results: int = 30) -> list[dict]:
         """Search SIG products via DuckDuckGo to bypass Cloudflare."""
         products = []
         ddg_query = f"site:sig.pl {query}"
 
+        # DDG returns ~10-15 results per page, calculate pages needed
+        max_pages = max(1, (max_results + 14) // 15)
+        # Cap at 10 pages to avoid DDG rate limiting
+        max_pages = min(max_pages, 10)
+        timeout = 25 + (max_pages - 1) * 5  # more time for more pages
+
         try:
-            logger.info(f"[SIG] Searching DuckDuckGo: {ddg_query}")
+            logger.info(f"[SIG] Searching DuckDuckGo: {ddg_query} (pages={max_pages})")
 
             # Run HTTP fetch in a subprocess to avoid async bot detection
             result = subprocess.run(
-                [sys.executable, "-c", _DDG_FETCH_SCRIPT, ddg_query],
+                [sys.executable, "-c", _DDG_FETCH_SCRIPT, ddg_query, str(max_pages)],
                 capture_output=True,
                 text=True,
-                timeout=25,
+                timeout=timeout,
             )
 
             if result.returncode != 0:
@@ -119,7 +171,7 @@ class SigScraper(BaseScraper):
             if p["url"] and p["url"] not in seen_urls:
                 seen_urls.add(p["url"])
                 unique.append(p)
-        products = unique[:30]
+        products = unique[:max_results]
 
         logger.info(f"[SIG] Scraped {len(products)} products total")
         return products

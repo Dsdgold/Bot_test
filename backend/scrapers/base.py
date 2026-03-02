@@ -13,7 +13,7 @@ class BaseScraper(ABC):
     base_url: str = ""
 
     @abstractmethod
-    async def search(self, query: str, engine) -> list[dict]:
+    async def search(self, query: str, engine, *, max_results: int = 30) -> list[dict]:
         """Search for products. Returns list of product dicts."""
         ...
 

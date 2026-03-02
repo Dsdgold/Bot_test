@@ -13,7 +13,7 @@ class CeneoScraper(BaseScraper):
     name = "ceneo.pl"
     base_url = "https://www.ceneo.pl"
 
-    async def search(self, query: str, engine) -> list[dict]:
+    async def search(self, query: str, engine, *, max_results: int = 30) -> list[dict]:
         products = []
         search_url = f"{self.base_url}/szukaj-{quote_plus(query)}"
 
@@ -69,7 +69,7 @@ class CeneoScraper(BaseScraper):
 
                 logger.info(f"[CENEO] Found {len(product_elements)} products")
 
-                for elem in product_elements[:30]:
+                for elem in product_elements[:max_results]:
                     try:
                         product = await self._extract_ceneo_product(elem)
                         if product and product.get("nazwa"):
@@ -200,4 +200,4 @@ class CeneoScraper(BaseScraper):
                 zdjecie=img,
             ))
 
-        return products[:30]
+        return products[:max_results]
