@@ -1,6 +1,7 @@
 """FastAPI application - Product Scraper Bot."""
 
 import asyncio
+import base64
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -222,6 +223,133 @@ async def list_jobs():
             "csv_file": job["csv_file"],
         })
     return {"jobs": sorted(jobs, key=lambda j: j["started_at"], reverse=True)}
+
+
+# --- Debug endpoint ---
+
+@app.get("/api/debug/sig")
+async def debug_sig(q: str = "test"):
+    """Debug SIG scraper - shows what the browser sees."""
+    from urllib.parse import quote_plus
+    from backend.utils.anti_detect import human_delay, human_scroll, human_mouse_move
+
+    engine = await ScraperEngine.get_instance()
+    search_url = f"https://www.sig.pl/szukaj-produktow?searchquery={quote_plus(q)}"
+    debug_info = {"query": q, "search_url": search_url}
+
+    try:
+        async with engine.new_page_with_images() as page:
+            # Go to homepage
+            await page.goto("https://www.sig.pl", wait_until="domcontentloaded")
+            await human_delay(page, 1500, 2500)
+
+            # Cookie consent
+            try:
+                cookie_btn = page.locator(
+                    "button:has-text('Akceptuję'), "
+                    "button:has-text('Zgadzam'), "
+                    "button:has-text('Accept'), "
+                    "[id*='cookie'] button, "
+                    "[class*='cookie'] button, "
+                    "[class*='consent'] button"
+                ).first
+                if await cookie_btn.is_visible(timeout=3000):
+                    await cookie_btn.click()
+                    await human_delay(page, 500, 1000)
+                    debug_info["cookie_accepted"] = True
+            except Exception:
+                debug_info["cookie_accepted"] = False
+
+            # Screenshot homepage
+            homepage_screenshot = await page.screenshot(type="png")
+            debug_info["homepage_url"] = page.url
+            debug_info["homepage_title"] = await page.title()
+
+            # Try to find search input
+            search_selectors = [
+                "input[name='searchquery']",
+                "input[name='search']",
+                "input[name='q']",
+                "input[type='search']",
+                "input[placeholder*='szukaj' i]",
+                "input[placeholder*='Szukaj' i]",
+                "input[placeholder*='search' i]",
+                "input[placeholder*='Wpisz' i]",
+                "input[placeholder*='produkt' i]",
+                "input[class*='search']",
+                "input[id*='search']",
+                "[class*='search'] input[type='text']",
+                "[class*='search-bar'] input",
+                "header input[type='text']",
+                "header input",
+                "nav input",
+            ]
+
+            found_input = None
+            for sel in search_selectors:
+                try:
+                    el = page.locator(sel).first
+                    if await el.is_visible(timeout=1000):
+                        found_input = sel
+                        break
+                except Exception:
+                    continue
+
+            debug_info["search_input_found"] = found_input
+
+            # Also list ALL inputs on page
+            all_inputs = await page.locator("input").all()
+            input_details = []
+            for inp in all_inputs[:20]:
+                try:
+                    attrs = {}
+                    for attr in ["type", "name", "id", "placeholder", "class"]:
+                        val = await inp.get_attribute(attr)
+                        if val:
+                            attrs[attr] = val
+                    vis = await inp.is_visible()
+                    attrs["visible"] = vis
+                    input_details.append(attrs)
+                except Exception:
+                    pass
+            debug_info["all_inputs"] = input_details
+
+            # Navigate to search URL directly
+            await page.goto(search_url, wait_until="domcontentloaded")
+            await human_delay(page, 3000, 5000)
+            await human_scroll(page)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass
+            await human_delay(page, 2000, 3000)
+
+            debug_info["result_url"] = page.url
+            debug_info["result_title"] = await page.title()
+
+            # Screenshot search results
+            results_screenshot = await page.screenshot(type="png", full_page=True)
+
+            # Count links matching product pattern
+            import re
+            content = await page.content()
+            debug_info["html_length"] = len(content)
+            product_links = re.findall(r'href="([^"]*,p\d{4,}[^"]*)"', content)
+            debug_info["product_url_links"] = product_links[:10]
+            debug_info["product_link_count"] = len(product_links)
+
+            # Get page text snippet
+            body_text = await page.locator("body").inner_text()
+            debug_info["body_text_snippet"] = body_text[:2000]
+
+            # Encode screenshots as base64
+            debug_info["homepage_screenshot"] = base64.b64encode(homepage_screenshot).decode()
+            debug_info["results_screenshot"] = base64.b64encode(results_screenshot).decode()
+
+    except Exception as e:
+        debug_info["error"] = str(e)
+
+    return JSONResponse(content=debug_info)
 
 
 # --- Background job runner ---
