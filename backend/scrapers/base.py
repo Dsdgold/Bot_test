@@ -47,4 +47,11 @@ class BaseScraper(ABC):
             "zdjecie": kwargs.get("zdjecie", ""),
             "ocena": kwargs.get("ocena", ""),
             "liczba_opinii": kwargs.get("liczba_opinii", ""),
+            "producent": kwargs.get("producent", ""),
+            "indeks": kwargs.get("indeks", ""),
+            "indeks_producenta": kwargs.get("indeks_producenta", ""),
+            "kod_produktu": kwargs.get("kod_produktu", ""),
+            "jednostka": kwargs.get("jednostka", ""),
+            "kategoria": kwargs.get("kategoria", ""),
+            "opis": kwargs.get("opis", ""),
         }

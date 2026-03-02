@@ -196,7 +196,7 @@ function renderTable(products) {
     if (products.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" style="text-align:center; padding:40px; color:var(--text-muted)">
+                <td colspan="6" style="text-align:center; padding:40px; color:var(--text-muted)">
                     Brak wyników do wyświetlenia
                 </td>
             </tr>
@@ -212,14 +212,30 @@ function renderTable(products) {
             ? `<img class="product-img" src="${escapeHtml(imgSrc)}" alt="" loading="lazy" onerror="this.style.display='none'">`
             : '<div class="product-img" style="background:var(--bg-tertiary)"></div>';
 
+        // Build product details lines
+        const details = [];
+        if (p.producent) details.push(`<span class="detail-label">Producent:</span> ${escapeHtml(p.producent)}`);
+        if (p.indeks) details.push(`<span class="detail-label">Indeks:</span> ${escapeHtml(p.indeks)}`);
+        if (p.indeks_producenta) details.push(`<span class="detail-label">Indeks prod.:</span> ${escapeHtml(p.indeks_producenta)}`);
+        if (p.jednostka) details.push(`<span class="detail-label">Jednostka:</span> ${escapeHtml(p.jednostka)}`);
+        if (p.kategoria) details.push(`<span class="detail-label">Kategoria:</span> ${escapeHtml(p.kategoria)}`);
+        if (p.dostepnosc) details.push(`<span class="detail-label">Dostępność:</span> ${escapeHtml(p.dostepnosc)}`);
+        if (p.ocena) details.push(`<span class="detail-label">Ocena:</span> ${escapeHtml(p.ocena)}`);
+        if (p.liczba_opinii) details.push(`<span class="detail-label">Opinii:</span> ${escapeHtml(p.liczba_opinii)}`);
+        const detailsHtml = details.length > 0
+            ? `<div class="product-details">${details.join('<br>')}</div>`
+            : '<span style="color:var(--text-muted)">-</span>';
+
         return `
             <tr>
                 <td>${imgHtml}</td>
-                <td><div class="product-name">${escapeHtml(p.nazwa)}</div></td>
+                <td>
+                    <div class="product-name">${escapeHtml(p.nazwa)}</div>
+                    ${p.opis ? `<div class="product-desc">${escapeHtml(p.opis)}</div>` : ''}
+                </td>
                 <td><span class="${priceClass}">${escapeHtml(price)}</span></td>
                 <td><span class="source-badge">${escapeHtml(p.zrodlo)}</span></td>
-                <td>${escapeHtml(p.dostepnosc || '-')}</td>
-                <td>${escapeHtml(p.ocena || '-')}</td>
+                <td>${detailsHtml}</td>
                 <td>
                     ${p.url ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" class="link-btn" title="Otwórz produkt">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -240,7 +256,10 @@ function filterResults() {
     const filtered = currentResults.filter(p =>
         p.nazwa.toLowerCase().includes(filter) ||
         p.zrodlo.toLowerCase().includes(filter) ||
-        (p.cena && p.cena.includes(filter))
+        (p.cena && p.cena.includes(filter)) ||
+        (p.producent && p.producent.toLowerCase().includes(filter)) ||
+        (p.indeks && p.indeks.toLowerCase().includes(filter)) ||
+        (p.kategoria && p.kategoria.toLowerCase().includes(filter))
     );
     renderTable(filtered);
 }

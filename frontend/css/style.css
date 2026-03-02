@@ -553,8 +553,7 @@ tr:hover td {
 .col-name { min-width: 250px; }
 .col-price { width: 120px; }
 .col-source { width: 140px; }
-.col-avail { width: 120px; }
-.col-rating { width: 80px; }
+.col-details { width: 240px; }
 .col-actions { width: 80px; }
 
 .product-img {
@@ -574,6 +573,30 @@ tr:hover td {
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
+}
+
+.product-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    line-height: 1.3;
+    max-width: 350px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.product-details {
+    font-size: 0.78rem;
+    line-height: 1.6;
+    max-width: 280px;
+}
+
+.product-details .detail-label {
+    color: var(--text-muted);
+    font-size: 0.72rem;
 }
 
 .product-price {
