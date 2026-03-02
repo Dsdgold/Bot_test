@@ -132,25 +132,55 @@ class SigScraper(BaseScraper):
         if "sig.pl" not in url:
             return None
 
+        # Skip non-product pages (homepage, categories, blog, etc.)
+        skip_patterns = [
+            r'sig\.pl/?$',
+            r'sig\.pl/marki',
+            r'sig\.pl/kontakt',
+            r'sig\.pl/kariera',
+            r'sig\.pl/oferta$',
+            r'sig\.pl/outlet$',
+            r'sig\.pl/oddzialy',
+            r'sig\.pl/media',
+        ]
+        for pattern in skip_patterns:
+            if re.search(pattern, url):
+                return None
+
         # Clean title - remove " - SIG" or " | SIG" suffix
         title = re.sub(r'\s*[-|–]\s*SIG.*$', '', title).strip()
+        # Remove trailing product codes like "826297"
+        title = re.sub(r'\s+\d{5,}$', '', title).strip()
 
-        # Try to extract price from snippet
+        if not title or len(title) < 5:
+            return None
+
+        # Try to extract price from snippet - match "XX,XX zł" pattern
+        # Must be a reasonable price (not a product code or random number)
         price = ""
         if snippet:
+            # Match prices like "19,31 zł" or "32,06 zł/szt" but NOT "304 24,21"
             price_match = re.search(
-                r'(\d[\d\s]*[.,]\d{2})\s*(?:zł|PLN|pln)',
+                r'(?<!\d)\b(\d{1,6}[.,]\d{2})\s*(?:zł|PLN)',
                 snippet,
             )
             if price_match:
                 price = price_match.group(1)
+
+        # Clean snippet for description
+        description = ""
+        if snippet:
+            # Take first sentence or first 150 chars
+            desc = re.split(r'[.!]', snippet)[0].strip()
+            if len(desc) > 10:
+                description = desc[:150]
 
         return self._build_product(
             nazwa=title,
             cena=self._normalize_price(price),
             zrodlo=self.name,
             url=url,
-            dostepnosc=snippet[:200] if snippet else "",
+            dostepnosc=description,
         )
 
     def _extract_ddg_url(self, href: str) -> str:
