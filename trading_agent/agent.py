@@ -358,7 +358,7 @@ class TradingAgent:
         return 100 - (100 / (1 + rs))
 
     async def _generate_ai_signal(self, tech_signal: Signal) -> Signal:
-        """AI is the PRIMARY decision maker. Called every tick."""
+        """AI is the PRIMARY decision maker, with strategy fallback."""
         if not self.ai_enabled:
             return tech_signal
 
@@ -384,7 +384,43 @@ class TradingAgent:
         # Convert AI analysis to signal
         ai_signal = self.ai_brain.get_signal_from_analysis(analysis, tech_signal)
 
-        # AI has FULL CONTROL - log technical agreement for info only
+        # FALLBACK: If AI says WAIT but strategy has a signal AND multi-TF trends align,
+        # use the strategy signal instead (AI Haiku is too conservative)
+        if ai_signal.side is None and tech_signal.side is not None and tech_signal.confidence >= 25:
+            trends = [
+                getattr(self.market_context, 'trend_5m', 'NEUTRAL'),
+                getattr(self.market_context, 'trend_15m', 'NEUTRAL'),
+                getattr(self.market_context, 'trend_1h', 'NEUTRAL'),
+            ]
+            up_count = sum(1 for t in trends if t == "UP")
+            down_count = sum(1 for t in trends if t == "DOWN")
+
+            # If 2+ timeframes agree on a direction, override AI WAIT
+            if up_count >= 2 or down_count >= 2:
+                override_side = Side.LONG if up_count >= 2 else Side.SHORT
+                # Use strategy signal but with conservative params
+                tech_signal.side = override_side
+                tech_signal.confidence = max(tech_signal.confidence, 50.0)
+                tech_signal._ai_leverage = 12
+                tech_signal._ai_position_size_pct = 0.50
+                tech_signal._ai_stop_loss_pct = 1.2
+                tech_signal._ai_take_profit_pct = 2.0
+                tech_signal._ai_trailing_stop_pct = 0.8
+                tech_signal._ai_risk_level = "MEDIUM"
+                tech_signal._ai_grade = "C"
+                tech_signal.reasons = [
+                    f"FALLBACK: AI WAIT overridden by strategy + TF alignment",
+                    f"Trends: 5m={trends[0]} 15m={trends[1]} 1h={trends[2]}",
+                    f"Strategy: {tech_signal.strength.value} ({tech_signal.confidence:.0f}%)",
+                    f"Lev:12x SL:1.2% TP:2.0%",
+                ]
+                logger.info(
+                    f"OVERRIDE: AI said WAIT but {down_count}+ TFs DOWN / {up_count}+ TFs UP — "
+                    f"using strategy {override_side.value} with conservative params"
+                )
+                return tech_signal
+
+        # AI has FULL CONTROL when it gives a direction
         if ai_signal.side and tech_signal.side:
             if ai_signal.side == tech_signal.side:
                 ai_signal.reasons.append(f"Tech CONFIRM({tech_signal.confidence:.0f}%)")
