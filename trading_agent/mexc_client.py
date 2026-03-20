@@ -265,11 +265,16 @@ class MEXCClient:
 
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
         """Set leverage for a symbol."""
-        params = {"symbol": symbol, "leverage": leverage}
+        # Try with openType (1=isolated, 2=cross)
+        params = {"symbol": symbol, "leverage": leverage, "openType": 2}
         data = await self._request(
             "POST", "/api/v1/private/position/change_leverage", params, signed=True
         )
-        return data.get("success", False)
+        if data.get("success"):
+            logger.info(f"Leverage set to {leverage}x for {symbol}")
+            return True
+        logger.warning(f"Set leverage response: {data}")
+        return False
 
     async def open_position(
         self,
