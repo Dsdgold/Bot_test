@@ -225,21 +225,12 @@
     <div class="modal">
         <h2>Agent Settings</h2>
 
-        <div style="padding: 12px; background: rgba(124,77,255,0.1); border: 1px solid rgba(124,77,255,0.3); border-radius: var(--radius); margin-bottom: 16px;">
-            <div style="font-size: 12px; font-weight: 600; color: var(--purple); margin-bottom: 8px;">API Keys (stored in memory only)</div>
-
-            <div class="form-group">
-                <label>Anthropic API Key (Claude AI)</label>
-                <input type="password" id="cfg-anthropic-key" placeholder="sk-ant-...">
+        <div style="padding: 12px; background: rgba(255,145,0,0.1); border: 1px solid rgba(255,145,0,0.3); border-radius: var(--radius); margin-bottom: 16px;">
+            <div style="font-size: 13px; font-weight: 600; color: #ff9100; margin-bottom: 10px;">Wklej Bybit API Secret aby rozpocząć</div>
+            <div class="form-group" style="margin-bottom: 0;">
+                <input type="password" id="cfg-bybit-secret" placeholder="Wklej swój Bybit API Secret tutaj..." style="font-size: 15px; padding: 12px; text-align: center;">
             </div>
-            <div class="form-group">
-                <label>Bybit API Key</label>
-                <input type="password" id="cfg-bybit-key" placeholder="Your Bybit API key...">
-            </div>
-            <div class="form-group">
-                <label>Bybit API Secret</label>
-                <input type="password" id="cfg-bybit-secret" placeholder="Your Bybit secret...">
-            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">API Key i Anthropic Key są już skonfigurowane w .env</div>
         </div>
 
         <div class="form-group">

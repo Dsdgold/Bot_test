@@ -63,13 +63,8 @@ async function saveSettings() {
         paper_trading: document.getElementById('cfg-mode').value === 'true',
     };
 
-    // API keys - only send if user entered them
-    const anthropicKey = document.getElementById('cfg-anthropic-key').value.trim();
-    const bybitKey = document.getElementById('cfg-bybit-key').value.trim();
+    // Bybit secret - the only key entered through dashboard
     const bybitSecret = document.getElementById('cfg-bybit-secret').value.trim();
-
-    if (anthropicKey) config.anthropic_api_key = anthropicKey;
-    if (bybitKey) config.bybit_api_key = bybitKey;
     if (bybitSecret) config.bybit_api_secret = bybitSecret;
 
     try {
@@ -80,9 +75,7 @@ async function saveSettings() {
         });
         const result = await resp.json();
 
-        // Clear password fields after saving
-        document.getElementById('cfg-anthropic-key').value = '';
-        document.getElementById('cfg-bybit-key').value = '';
+        // Clear secret field after saving
         document.getElementById('cfg-bybit-secret').value = '';
 
         // Show confirmation
@@ -96,6 +89,11 @@ async function saveSettings() {
         }
 
         closeSettings();
+
+        // Auto-start agent after saving secret
+        if (bybitSecret && !isRunning) {
+            startAgent();
+        }
     } catch (e) {
         console.error('Config error:', e);
     }
