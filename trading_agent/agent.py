@@ -401,18 +401,18 @@ class TradingAgent:
                 # Use strategy signal but with conservative params
                 tech_signal.side = override_side
                 tech_signal.confidence = max(tech_signal.confidence, 50.0)
-                tech_signal._ai_leverage = 12
-                tech_signal._ai_position_size_pct = 0.50
-                tech_signal._ai_stop_loss_pct = 1.2
-                tech_signal._ai_take_profit_pct = 2.0
+                tech_signal._ai_leverage = 35
+                tech_signal._ai_position_size_pct = 0.85
+                tech_signal._ai_stop_loss_pct = 1.0
+                tech_signal._ai_take_profit_pct = 3.0
                 tech_signal._ai_trailing_stop_pct = 0.8
-                tech_signal._ai_risk_level = "MEDIUM"
-                tech_signal._ai_grade = "C"
+                tech_signal._ai_risk_level = "HIGH"
+                tech_signal._ai_grade = "B"
                 tech_signal.reasons = [
                     f"FALLBACK: AI WAIT overridden by strategy + TF alignment",
                     f"Trends: 5m={trends[0]} 15m={trends[1]} 1h={trends[2]}",
                     f"Strategy: {tech_signal.strength.value} ({tech_signal.confidence:.0f}%)",
-                    f"Lev:12x SL:1.2% TP:2.0%",
+                    f"Lev:35x SL:1.0% TP:3.0%",
                 ]
                 logger.info(
                     f"OVERRIDE: AI said WAIT but {down_count}+ TFs DOWN / {up_count}+ TFs UP — "
