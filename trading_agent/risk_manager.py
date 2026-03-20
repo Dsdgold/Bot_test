@@ -128,35 +128,38 @@ class RiskManager:
         if position.side == Side.SHORT and current_price <= position.take_profit:
             return True, f"Take-profit hit at {current_price:.2f}"
 
-        # Aggressive trailing stop — lock in profits FAST
-        # Phase 1: As soon as we're in profit, start trailing TIGHT
-        if leveraged_pnl_pct > 1.0:
-            # Tight trailing: 0.3% from current price — lock those dollars in
-            trail_pct = 0.003  # 0.3% — very tight
-            if position.side == Side.LONG:
-                new_sl = current_price * (1 - trail_pct)
-                if new_sl > position.stop_loss:
-                    position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (tight) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
-            else:
-                new_sl = current_price * (1 + trail_pct)
-                if new_sl < position.stop_loss:
-                    position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (tight) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
+        # Calculate actual dollar PnL
+        dollar_pnl = pnl_pct / 100 * position.entry_price * position.quantity * position.leverage
 
-        # Phase 2: At 5%+ profit, give a bit more room to ride the trend
-        if leveraged_pnl_pct > 5.0:
-            trail_pct = 0.005  # 0.5% — slightly wider to ride big moves
+        # Aggressive trailing — based on DOLLAR profit, not just %
+        # On a $64 account, $2+ profit is significant — lock it in TIGHT
+        if dollar_pnl >= 2.0:
+            # Ultra tight: 0.15% from current price — protect those dollars
+            trail_pct = 0.0015
             if position.side == Side.LONG:
                 new_sl = current_price * (1 - trail_pct)
                 if new_sl > position.stop_loss:
                     position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (wide) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
+                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
             else:
                 new_sl = current_price * (1 + trail_pct)
                 if new_sl < position.stop_loss:
                     position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (wide) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
+                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
+
+        elif dollar_pnl >= 0.50:
+            # Tight: 0.25% — start protecting early
+            trail_pct = 0.0025
+            if position.side == Side.LONG:
+                new_sl = current_price * (1 - trail_pct)
+                if new_sl > position.stop_loss:
+                    position.stop_loss = round(new_sl, 2)
+                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
+            else:
+                new_sl = current_price * (1 + trail_pct)
+                if new_sl < position.stop_loss:
+                    position.stop_loss = round(new_sl, 2)
+                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
 
         # Trend reversal detection
         if position.side == Side.LONG:
