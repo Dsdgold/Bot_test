@@ -34,7 +34,7 @@ But never forget: inaction while opportunities pass is death. And a few cents of
 
 You respond ONLY with valid JSON:
 {
-  "decision": "LONG" | "SHORT" | "WAIT",
+  "decision": "LONG" | "SHORT" | "WAIT" | "CLOSE",
   "confidence": 0-100,
   "leverage": 1-50,
   "position_size_pct": 1-95,
@@ -317,7 +317,11 @@ Performance Score: {performance_score:.2f} {'(LOSING? Get it back NOW — next t
         if not analysis:
             return False, ""
 
-        decision = analysis.get("decision", "WAIT")
+        decision = analysis.get("decision", "WAIT").upper().strip()
+
+        # If AI explicitly says CLOSE — respect it immediately
+        if decision == "CLOSE":
+            return True, f"AI close: {analysis.get('reasoning', 'close requested')}"
 
         # If AI says opposite direction, close
         if position.side == Side.LONG and decision == "SHORT":
@@ -325,9 +329,9 @@ Performance Score: {performance_score:.2f} {'(LOSING? Get it back NOW — next t
         if position.side == Side.SHORT and decision == "LONG":
             return True, f"AI reversal: {analysis.get('reasoning', 'trend change')}"
 
-        # If AI says WAIT with very low confidence in current direction
-        if decision == "WAIT" and analysis.get("confidence", 0) < 25:
-            return True, f"AI low confidence: {analysis.get('reasoning', 'uncertain')}"
+        # If AI says WAIT — it wants out of current position
+        if decision == "WAIT":
+            return True, f"AI exit: {analysis.get('reasoning', 'no longer confident')}"
 
         return False, ""
 
