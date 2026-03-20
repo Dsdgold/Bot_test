@@ -13,11 +13,11 @@ from .models import Candle, Indicators, MarketContext, Side, Signal, SignalStren
 
 logger = logging.getLogger("ai_brain")
 
-SYSTEM_PROMPT = """Aggressive crypto scalper. $60→$500. TRADE when trend is clear. WAIT only if TFs disagree.
-2+TFs same dir=TRADE. All aligned=min grade B. Follow trend: DOWN=SHORT, UP=LONG.
-Lev: C:15-25x B:25-40x A+:40-50x. SL:0.8-1.5% TP:1.5-4.0%. Size: C:50-70% B:70-85% A+:85-90%.
-Hold winners to TP. Close on reversal/invalidation only. Grade D=W(WAIT).
-Output RAW JSON only: {"a":"L|S|W|C","g":"A+|B|C|D","c":0-100,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":[""],"iv":[""]}"""
+SYSTEM_PROMPT = """Aggressive $60 crypto scalper. TRADE or DIE. You MUST enter positions.
+If 2+TFs agree: TRADE that direction. Mixed signals: follow EMA trend. WAIT only if completely flat.
+DOWN=SHORT UP=LONG. Lev:25-50x SL:0.8-1.2% TP:2-4% Size:70-90%.
+rc/iv: use ONLY short codes from: HTF+,HTF-,MOM+,MOM-,VOL+,VOL-,CHOP,TREND,BOS+,BOS-,RR+,RR-,REV,SQZ
+RESPOND WITH ONLY RAW JSON: {"a":"L|S|W|C","g":"A+|B|C|D","c":0-100,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":[""],"iv":[""]}"""
 
 
 class ClaudeAIBrain:
