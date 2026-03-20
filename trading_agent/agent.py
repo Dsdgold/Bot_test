@@ -113,12 +113,12 @@ class TradingAgent:
         if new_candles:
             self.candles = new_candles
 
+        # 2. Update account (always, even without market data)
+        await self._update_account()
+
         if not self.candles or not self.ticker:
             logger.warning("No market data available")
             return
-
-        # 2. Update account
-        await self._update_account()
 
         # 3. Calculate technical indicators (always)
         tech_signal = self.strategy.analyze(self.candles)

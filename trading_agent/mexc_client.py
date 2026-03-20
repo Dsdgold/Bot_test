@@ -105,13 +105,17 @@ class MEXCClient:
         self, symbol: str, interval: str = "Min1", limit: int = 200
     ) -> List[Candle]:
         """Get candlestick data."""
-        params = {"symbol": symbol, "interval": interval, "limit": limit}
-        data = await self._request("GET", "/api/v1/contract/kline/index_price", params)
+        # MEXC futures kline endpoint: symbol in path, params in query
+        data = await self._request(
+            "GET", f"/api/v1/contract/kline/{symbol}",
+            params={"interval": interval, "limit": limit}
+        )
 
         if not data.get("success") or not data.get("data"):
-            # Try contract kline endpoint
+            # Fallback: try index price kline
             data = await self._request(
-                "GET", f"/api/v1/contract/kline?symbol={symbol}&interval={interval}&limit={limit}"
+                "GET", "/api/v1/contract/kline/index_price",
+                params={"symbol": symbol, "interval": interval, "limit": limit}
             )
 
         candles = []
