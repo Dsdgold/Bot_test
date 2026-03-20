@@ -672,17 +672,22 @@ class TradingAgent:
             and self.tick_count % self.config.ai.analysis_every_n_ticks == 0
             and hold_time >= min_hold  # Don't ask AI to close before min hold time
         ):
-            # If position is in profit → DON'T let AI close it, let SL/TP/trailing handle it
-            if dollar_pnl > 0.5:
-                logger.info(f"Position in profit (${dollar_pnl:.2f}) — skipping AI close check, letting TP/trailing run")
-            else:
-                ai_close, ai_reason = await self.ai_brain.should_close_position(
-                    self.candles, indicators, self.position, self.account.balance,
-                    self.market_context,
-                )
-                if ai_close:
+            ai_close, ai_reason = await self.ai_brain.should_close_position(
+                self.candles, indicators, self.position, self.account.balance,
+                self.market_context,
+            )
+            if ai_close:
+                # Profit >= $1 → close and bank it (grosz do grosza)
+                # Profit $0-$1 → too small, fee would eat it, let it run
+                # Loss → AI says close, respect it (cut losses)
+                if dollar_pnl >= 1.0:
+                    await self._close_position(f"AI profit take: ${dollar_pnl:.2f} | {ai_reason}")
+                    return
+                elif dollar_pnl < 0:
                     await self._close_position(ai_reason)
                     return
+                else:
+                    logger.info(f"AI wants close but profit too small (${dollar_pnl:.2f}) — holding for more")
 
             # Update AI reasoning for dashboard
             if self.ai_brain.last_analysis:
