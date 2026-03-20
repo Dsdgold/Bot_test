@@ -34,7 +34,7 @@ class TradingConfig:
 
     # Position sizing (defaults — AI overrides)
     max_position_pct: float = 0.30
-    min_order_usdt: float = 5.0
+    min_order_usdt: float = 1.0
 
     # Risk management (defaults — AI overrides)
     stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "1.0"))
