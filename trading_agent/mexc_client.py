@@ -170,7 +170,7 @@ class MEXCClient:
                             )
                         )
             if candles:
-                logger.info(f"Parsed {len(candles)} candles, latest close={candles[-1].close}")
+                logger.debug(f"Parsed {len(candles)} candles, latest close={candles[-1].close}")
             else:
                 logger.warning(f"Could not parse kline data format: {type(raw)}, sample={str(raw)[:200]}")
         return candles
@@ -178,9 +178,37 @@ class MEXCClient:
     async def get_depth(self, symbol: str, limit: int = 20) -> Dict:
         """Get order book depth."""
         data = await self._request(
-            "GET", f"/api/v1/contract/depth/{symbol}?limit={limit}"
+            "GET", f"/api/v1/contract/depth/{symbol}",
+            params={"limit": limit}
         )
         return data.get("data", {})
+
+    async def get_funding_rate(self, symbol: str) -> Dict:
+        """Get current funding rate for symbol."""
+        data = await self._request(
+            "GET", f"/api/v1/contract/funding_rate/{symbol}"
+        )
+        if data.get("success") and data.get("data"):
+            return data["data"]
+        return {}
+
+    async def get_open_interest(self, symbol: str) -> Dict:
+        """Get open interest for symbol."""
+        data = await self._request(
+            "GET", f"/api/v1/contract/open_interest/{symbol}"
+        )
+        if data.get("success") and data.get("data"):
+            return data["data"]
+        return {}
+
+    async def get_klines_multi(self, symbol: str, intervals: List[str], limit: int = 100) -> Dict[str, List[Candle]]:
+        """Get klines for multiple timeframes."""
+        result = {}
+        for interval in intervals:
+            candles = await self.get_klines(symbol, interval, limit)
+            if candles:
+                result[interval] = candles
+        return result
 
     # ── Account ──────────────────────────────────────────────────
 
@@ -191,7 +219,7 @@ class MEXCClient:
             logger.error(f"Failed to get account info: {data}")
             return []
         result = data.get("data", [])
-        logger.info(f"Account info response: {result}")
+        logger.debug(f"Account info response type: {type(result)}, len: {len(result) if isinstance(result, list) else 'N/A'}")
         return result
 
     async def get_balance(self) -> float:
@@ -201,9 +229,9 @@ class MEXCClient:
             for asset in info:
                 if asset.get("currency") == "USDT":
                     balance = float(asset.get("availableBalance", 0))
-                    logger.info(f"Found USDT balance: {balance}")
+                    logger.debug(f"Found USDT balance: {balance}")
                     return balance
-            logger.warning(f"USDT not found in assets list: {info}")
+            logger.warning("USDT not found in assets list")
         elif isinstance(info, dict):
             # Handle case where data is a single object
             if info.get("currency") == "USDT":

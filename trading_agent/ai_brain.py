@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 
-from .models import Candle, Indicators, Side, Signal, SignalStrength, Position
+from .models import Candle, Indicators, MarketContext, Side, Signal, SignalStrength, Position
 
 logger = logging.getLogger("ai_brain")
 
@@ -85,13 +85,14 @@ class ClaudeAIBrain:
         position: Optional[Position] = None,
         recent_trades: list = None,
         balance: float = 0,
+        market_context: Optional[MarketContext] = None,
     ) -> Optional[dict]:
         """Send market data to Claude for analysis."""
         if not self.enabled:
             return None
 
         try:
-            prompt = self._build_prompt(candles, indicators, position, recent_trades, balance)
+            prompt = self._build_prompt(candles, indicators, position, recent_trades, balance, market_context)
 
             resp = await self.client.post(
                 self.api_url,
@@ -151,6 +152,7 @@ class ClaudeAIBrain:
         position: Optional[Position],
         recent_trades: list,
         balance: float,
+        market_context: Optional[MarketContext] = None,
     ) -> str:
         """Build the analysis prompt with all market data."""
         # Recent price action (last 20 candles)
@@ -232,6 +234,32 @@ Should I HOLD or CLOSE this position? If CLOSE, set decision to opposite directi
                 trades_info.append(f"  {t.side.value}: entry={t.entry_price:.2f} exit={t.exit_price:.2f} pnl={t.pnl:+.2f} ({t.reason})")
             prompt += f"\n\nLAST TRADES:\n" + "\n".join(trades_info)
 
+        # Market context (funding, OI, order book, multi-timeframe)
+        if market_context:
+            prompt += f"""
+
+FUNDING RATE & OPEN INTEREST:
+- Funding Rate: {market_context.funding_rate:.6f} ({'longs pay shorts' if market_context.funding_rate > 0 else 'shorts pay longs' if market_context.funding_rate < 0 else 'neutral'})
+- Open Interest Change: {market_context.open_interest_change:+.2f}% {'(rising = new money entering)' if market_context.open_interest_change > 0 else '(falling = positions closing)'}
+
+ORDER BOOK ANALYSIS:
+- Book Imbalance: {market_context.book_imbalance:+.1f}% ({'more buyers' if market_context.book_imbalance > 0 else 'more sellers'})
+- Largest Bid Wall: {market_context.bid_wall_price:.2f} (size: {market_context.bid_wall_size:.2f}) = SUPPORT
+- Largest Ask Wall: {market_context.ask_wall_price:.2f} (size: {market_context.ask_wall_size:.2f}) = RESISTANCE
+- Total Bid Volume: {market_context.bid_total:.2f} | Total Ask Volume: {market_context.ask_total:.2f}
+
+MULTI-TIMEFRAME TRENDS (critical for confirming 1m signals):
+- 5min:  Trend={market_context.trend_5m}  RSI={market_context.rsi_5m:.1f}
+- 15min: Trend={market_context.trend_15m} RSI={market_context.rsi_15m:.1f}
+- 1hour: Trend={market_context.trend_1h}  RSI={market_context.rsi_1h:.1f}
+- RULE: Only trade in direction of 15m+1h trend! If 1h=UP, prefer LONG. If 1h=DOWN, prefer SHORT.
+
+TRADING SESSION: {market_context.trading_session}
+- ASIA (00-08 UTC): moderate volatility
+- EUROPE (08-14 UTC): increasing volatility
+- US (14-21 UTC): highest volatility, best for scalping
+- OFF_HOURS (21-00 UTC): low volatility, avoid large positions"""
+
         prompt += f"\n\nACCOUNT BALANCE: ${balance:.2f}"
         prompt += "\n\nYou have FULL CONTROL. Decide: direction, leverage, position size %, stop-loss %, take-profit %. Respond ONLY with JSON."
 
@@ -289,9 +317,10 @@ Should I HOLD or CLOSE this position? If CLOSE, set decision to opposite directi
         indicators: Indicators,
         position: Position,
         balance: float,
+        market_context: Optional[MarketContext] = None,
     ) -> tuple[bool, str]:
         """Ask Claude if we should close the current position."""
-        analysis = await self.analyze(candles, indicators, position, [], balance)
+        analysis = await self.analyze(candles, indicators, position, [], balance, market_context)
         if not analysis:
             return False, ""
 

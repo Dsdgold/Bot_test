@@ -14,7 +14,7 @@ from .strategy import ScalpingStrategy
 from .risk_manager import RiskManager
 from .ai_brain import ClaudeAIBrain
 from .models import (
-    AccountState, Candle, Position, Signal, Side, Trade, Ticker
+    AccountState, Candle, MarketContext, Position, Signal, Side, Trade, Ticker
 )
 
 logger = logging.getLogger("agent")
@@ -59,6 +59,10 @@ class TradingAgent:
         self.ai_reasoning: str = ""
         self.ai_risk_level: str = ""
         self.ai_enabled: bool = bool(config.ai.api_key)
+
+        # Market context for advanced analysis
+        self.market_context = MarketContext()
+        self.prev_open_interest: float = 0.0
 
     async def start(self):
         """Start the trading agent."""
@@ -120,21 +124,25 @@ class TradingAgent:
             logger.warning("No market data available")
             return
 
-        # 3. Calculate technical indicators (always)
+        # 3. Fetch extended market context (every 3 ticks to save API calls)
+        if self.tick_count % 3 == 0:
+            await self._update_market_context(symbol)
+
+        # 4. Calculate technical indicators (always)
         tech_signal = self.strategy.analyze(self.candles)
 
-        # 4. Monitor existing position
+        # 5. Monitor existing position
         if self.position:
             await self._monitor_position(tech_signal)
             return
 
-        # 5. AI-enhanced signal generation
+        # 6. AI-enhanced signal generation
         signal = await self._generate_ai_signal(tech_signal)
         self.signals.append(signal)
         if len(self.signals) > 500:
             self.signals = self.signals[-500:]
 
-        # 6. Check if we should trade
+        # 7. Check if we should trade
         if signal.side is None or signal.confidence < self.config.trading.min_confidence:
             return
 
@@ -143,8 +151,138 @@ class TradingAgent:
             logger.info(f"Cannot trade: {reason}")
             return
 
-        # 7. Execute trade
+        # 8. Execute trade
         await self._open_position(signal)
+
+    async def _update_market_context(self, symbol: str):
+        """Fetch funding rate, open interest, order book, and multi-timeframe data."""
+        try:
+            # Funding rate
+            funding = await self.client.get_funding_rate(symbol)
+            if funding:
+                self.market_context.funding_rate = float(funding.get("fundingRate", 0))
+                self.market_context.next_funding_time = int(funding.get("nextSettleTime", 0))
+
+            # Open interest
+            oi_data = await self.client.get_open_interest(symbol)
+            if oi_data:
+                new_oi = float(oi_data.get("openInterest", oi_data.get("value", 0)))
+                if self.prev_open_interest > 0 and new_oi > 0:
+                    self.market_context.open_interest_change = (
+                        (new_oi - self.prev_open_interest) / self.prev_open_interest * 100
+                    )
+                self.market_context.open_interest = new_oi
+                self.prev_open_interest = new_oi
+
+            # Order book depth
+            depth = await self.client.get_depth(symbol, 20)
+            if depth:
+                bids = depth.get("bids", [])
+                asks = depth.get("asks", [])
+                if bids and asks:
+                    # Find largest bid/ask walls
+                    bid_total = 0.0
+                    ask_total = 0.0
+                    max_bid = (0, 0)
+                    max_ask = (0, 0)
+                    for b in bids:
+                        price = float(b[0]) if isinstance(b, (list, tuple)) else float(b.get("price", 0))
+                        size = float(b[1]) if isinstance(b, (list, tuple)) else float(b.get("quantity", 0))
+                        bid_total += size
+                        if size > max_bid[1]:
+                            max_bid = (price, size)
+                    for a in asks:
+                        price = float(a[0]) if isinstance(a, (list, tuple)) else float(a.get("price", 0))
+                        size = float(a[1]) if isinstance(a, (list, tuple)) else float(a.get("quantity", 0))
+                        ask_total += size
+                        if size > max_ask[1]:
+                            max_ask = (price, size)
+
+                    self.market_context.bid_wall_price = max_bid[0]
+                    self.market_context.bid_wall_size = max_bid[1]
+                    self.market_context.ask_wall_price = max_ask[0]
+                    self.market_context.ask_wall_size = max_ask[1]
+                    self.market_context.bid_total = bid_total
+                    self.market_context.ask_total = ask_total
+                    total = bid_total + ask_total
+                    self.market_context.book_imbalance = (
+                        (bid_total - ask_total) / total * 100 if total > 0 else 0
+                    )
+
+            # Multi-timeframe analysis (5m, 15m, 1h)
+            mtf = await self.client.get_klines_multi(
+                symbol, ["Min5", "Min15", "Min60"], 60
+            )
+            for interval, candles in mtf.items():
+                if len(candles) < 20:
+                    continue
+                # Simple trend: compare EMA9 vs EMA21 from closes
+                closes = [c.close for c in candles]
+                ema9 = self._simple_ema(closes, 9)
+                ema21 = self._simple_ema(closes, 21)
+                rsi = self._simple_rsi(closes, 14)
+                trend = "UP" if ema9 > ema21 else "DOWN" if ema9 < ema21 else "NEUTRAL"
+
+                if interval == "Min5":
+                    self.market_context.trend_5m = trend
+                    self.market_context.rsi_5m = rsi
+                elif interval == "Min15":
+                    self.market_context.trend_15m = trend
+                    self.market_context.rsi_15m = rsi
+                elif interval == "Min60":
+                    self.market_context.trend_1h = trend
+                    self.market_context.rsi_1h = rsi
+
+            # Session timing
+            hour = datetime.utcnow().hour
+            if 0 <= hour < 8:
+                self.market_context.trading_session = "ASIA"
+            elif 8 <= hour < 14:
+                self.market_context.trading_session = "EUROPE"
+            elif 14 <= hour < 21:
+                self.market_context.trading_session = "US"
+            else:
+                self.market_context.trading_session = "OFF_HOURS"
+
+            logger.info(
+                f"Market context: funding={self.market_context.funding_rate:.6f} | "
+                f"OI change={self.market_context.open_interest_change:+.2f}% | "
+                f"book={self.market_context.book_imbalance:+.1f}% | "
+                f"trends: 5m={self.market_context.trend_5m} 15m={self.market_context.trend_15m} "
+                f"1h={self.market_context.trend_1h} | session={self.market_context.trading_session}"
+            )
+
+        except Exception as e:
+            logger.error(f"Market context update failed: {e}")
+
+    @staticmethod
+    def _simple_ema(data: list, period: int) -> float:
+        """Calculate simple EMA from a list of values."""
+        if len(data) < period:
+            return data[-1] if data else 0
+        multiplier = 2 / (period + 1)
+        ema = sum(data[:period]) / period
+        for val in data[period:]:
+            ema = (val - ema) * multiplier + ema
+        return ema
+
+    @staticmethod
+    def _simple_rsi(data: list, period: int = 14) -> float:
+        """Calculate RSI from a list of close prices."""
+        if len(data) < period + 1:
+            return 50.0
+        gains = []
+        losses = []
+        for i in range(1, len(data)):
+            change = data[i] - data[i - 1]
+            gains.append(max(change, 0))
+            losses.append(max(-change, 0))
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
 
     async def _generate_ai_signal(self, tech_signal: Signal) -> Signal:
         """Combine technical analysis with Claude AI reasoning."""
@@ -157,13 +295,14 @@ class TradingAgent:
         if not use_ai:
             return tech_signal
 
-        # Ask Claude to analyze the market
+        # Ask Claude to analyze the market with full context
         analysis = await self.ai_brain.analyze(
             candles=self.candles,
             indicators=tech_signal.indicators or self.strategy.prev_indicators,
             position=None,
             recent_trades=self.trades[-5:] if self.trades else [],
             balance=self.account.balance,
+            market_context=self.market_context,
         )
 
         if not analysis:
@@ -350,7 +489,8 @@ class TradingAgent:
             and self.tick_count % self.config.ai.analysis_every_n_ticks == 0
         ):
             ai_close, ai_reason = await self.ai_brain.should_close_position(
-                self.candles, indicators, self.position, self.account.balance
+                self.candles, indicators, self.position, self.account.balance,
+                self.market_context,
             )
             if ai_close:
                 await self._close_position(ai_reason)
@@ -424,6 +564,15 @@ class TradingAgent:
             "ai_reasoning": self.ai_reasoning,
             "ai_risk_level": self.ai_risk_level,
             "ai_analysis_count": self.ai_brain.analysis_count,
+            "market_context": {
+                "funding_rate": round(self.market_context.funding_rate, 6),
+                "open_interest_change": round(self.market_context.open_interest_change, 2),
+                "book_imbalance": round(self.market_context.book_imbalance, 1),
+                "trend_5m": self.market_context.trend_5m,
+                "trend_15m": self.market_context.trend_15m,
+                "trend_1h": self.market_context.trend_1h,
+                "trading_session": self.market_context.trading_session,
+            },
             "account": {
                 "balance": round(self.account.balance, 2),
                 "available": round(self.account.available, 2),

@@ -129,6 +129,35 @@ class Trade:
 
 
 @dataclass
+class MarketContext:
+    """Extended market data for AI analysis."""
+    # Funding rate
+    funding_rate: float = 0.0
+    next_funding_time: int = 0
+    # Open interest
+    open_interest: float = 0.0
+    open_interest_change: float = 0.0
+    # Order book
+    bid_wall_price: float = 0.0
+    bid_wall_size: float = 0.0
+    ask_wall_price: float = 0.0
+    ask_wall_size: float = 0.0
+    bid_total: float = 0.0
+    ask_total: float = 0.0
+    book_imbalance: float = 0.0  # >0 = more bids, <0 = more asks
+    # Multi-timeframe trends
+    trend_5m: str = "NEUTRAL"  # UP/DOWN/NEUTRAL
+    trend_15m: str = "NEUTRAL"
+    trend_1h: str = "NEUTRAL"
+    rsi_5m: float = 50.0
+    rsi_15m: float = 50.0
+    rsi_1h: float = 50.0
+    # Session info
+    trading_session: str = "OFF_HOURS"  # ASIA/EUROPE/US/OFF_HOURS
+    session_volume_ratio: float = 1.0  # current vs average
+
+
+@dataclass
 class AccountState:
     """Current account state."""
     balance: float = 0.0
