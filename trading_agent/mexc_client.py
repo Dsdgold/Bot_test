@@ -194,11 +194,20 @@ class MEXCClient:
 
     async def get_open_interest(self, symbol: str) -> Dict:
         """Get open interest for symbol."""
+        # Try different endpoint formats
         data = await self._request(
-            "GET", f"/api/v1/contract/open_interest/{symbol}"
+            "GET", "/api/v1/contract/open_interest",
+            params={"symbol": symbol}
         )
         if data.get("success") and data.get("data"):
             return data["data"]
+        # Fallback: try ticker which includes OI
+        data = await self._request(
+            "GET", f"/api/v1/contract/ticker?symbol={symbol}"
+        )
+        if data.get("success") and data.get("data"):
+            t = data["data"]
+            return {"openInterest": t.get("holdVol", 0)}
         return {}
 
     async def get_klines_multi(self, symbol: str, intervals: List[str], limit: int = 100) -> Dict[str, List[Candle]]:
