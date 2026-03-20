@@ -506,15 +506,14 @@ class TradingAgent:
                 original_quantity=quantity,
             )
         else:
-            # Use limit order at current price for lower fees
-            limit_price = self.ticker.bid if signal.side == Side.LONG else self.ticker.ask
+            # Use market order for reliability
             order_id = await self.client.open_position(
                 self.config.trading.symbol,
                 signal.side,
                 quantity,
                 ai_leverage,
-                price=limit_price,
-                use_limit=True,
+                price=None,
+                use_limit=False,
             )
             if order_id:
                 self.position = Position(

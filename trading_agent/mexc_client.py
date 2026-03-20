@@ -74,7 +74,14 @@ class MEXCClient:
                 resp = await self.client.post(url, content=body, headers=headers)
 
             logger.debug(f"API response status={resp.status_code}")
-            data = resp.json()
+            if resp.status_code == 403:
+                logger.error(f"MEXC 403 Forbidden on {path} - check API key permissions and futures account activation")
+                return {"success": False, "message": "403 Forbidden - check API permissions"}
+            try:
+                data = resp.json()
+            except Exception:
+                logger.error(f"Non-JSON response from {path}: status={resp.status_code} body={resp.text[:200]}")
+                return {"success": False, "message": f"Non-JSON response: {resp.status_code}"}
             if data.get("success") is False:
                 logger.error(f"MEXC API error on {path}: code={data.get('code')} msg={data.get('message', data)}")
             return data
@@ -281,6 +288,20 @@ class MEXCClient:
         logger.info(f"Pre-setting leverage skipped (will use per-order leverage: {leverage}x)")
         return False
 
+    async def get_contract_detail(self, symbol: str) -> Optional[Dict]:
+        """Get contract details (contract size, min volume, etc.)."""
+        data = await self._request("GET", "/api/v1/contract/detail")
+        if data.get("success") and data.get("data"):
+            for contract in data["data"]:
+                if contract.get("symbol") == symbol:
+                    logger.info(
+                        f"Contract {symbol}: contractSize={contract.get('contractSize')} "
+                        f"minVol={contract.get('minVol')} maxVol={contract.get('maxVol')} "
+                        f"priceUnit={contract.get('priceUnit')}"
+                    )
+                    return contract
+        return None
+
     async def open_position(
         self,
         symbol: str,
@@ -290,22 +311,35 @@ class MEXCClient:
         price: Optional[float] = None,
         use_limit: bool = True,
     ) -> Optional[str]:
-        """Open a futures position. Uses limit order by default to save fees."""
+        """Open a futures position. Quantity is in USDT notional value."""
         # Side: 1=open long, 2=close short, 3=open short, 4=close long
         open_type = 1 if side == Side.LONG else 3
 
-        if use_limit and price and price > 0:
-            order_type = 1  # Limit order (maker fee = lower)
-            order_price = price
-            logger.info(f"Using LIMIT order at {price:.2f} (lower fees)")
+        # MEXC futures uses 'vol' in number of contracts
+        # First get contract details to know contract size
+        contract = await self.get_contract_detail(symbol)
+        if contract:
+            contract_size = float(contract.get("contractSize", 0.0001))
+            contract_value = contract_size * (price if price and price > 0 else 1)
+            # Convert BTC quantity to number of contracts
+            vol = max(1, int(quantity / contract_size))
+            logger.info(f"Contract size: {contract_size} | Quantity: {quantity:.6f} → {vol} contracts")
         else:
-            order_type = 5  # Market order
-            order_price = 0
+            # Fallback: assume 0.0001 BTC per contract for BTC_USDT
+            vol = max(1, int(quantity / 0.0001))
+            logger.info(f"Using fallback contract size 0.0001 | {quantity:.6f} → {vol} contracts")
+
+        # Use market orders for reliability
+        order_type = 5  # Market order
+        order_price = price if (use_limit and price and price > 0) else 0
+        if use_limit and price and price > 0:
+            order_type = 1  # Limit
+            logger.info(f"Using LIMIT order at {price:.2f} (lower fees)")
 
         params = {
             "symbol": symbol,
             "price": order_price,
-            "vol": quantity,
+            "vol": vol,
             "side": open_type,
             "type": order_type,
             "openType": 2,  # Cross margin
@@ -343,14 +377,19 @@ class MEXCClient:
         side: Side,
         quantity: float,
     ) -> Optional[str]:
-        """Close a futures position with market order."""
+        """Close a futures position with market order. Quantity in BTC."""
         # 2=close short (close a long), 4=close long (close a short)
         close_type = 4 if side == Side.LONG else 2
+
+        # Convert to contracts
+        contract = await self.get_contract_detail(symbol)
+        contract_size = float(contract.get("contractSize", 0.0001)) if contract else 0.0001
+        vol = max(1, int(quantity / contract_size))
 
         params = {
             "symbol": symbol,
             "price": 0,
-            "vol": quantity,
+            "vol": vol,
             "side": close_type,
             "type": 5,  # Market order for closes (speed matters)
             "openType": 2,
@@ -374,13 +413,18 @@ class MEXCClient:
         side: Side,
         quantity: float,
     ) -> Optional[str]:
-        """Partially close a position."""
+        """Partially close a position. Quantity in BTC."""
         close_type = 4 if side == Side.LONG else 2
+
+        # Convert to contracts
+        contract = await self.get_contract_detail(symbol)
+        contract_size = float(contract.get("contractSize", 0.0001)) if contract else 0.0001
+        vol = max(1, int(quantity / contract_size))
 
         params = {
             "symbol": symbol,
             "price": 0,
-            "vol": quantity,
+            "vol": vol,
             "side": close_type,
             "type": 5,
             "openType": 2,
