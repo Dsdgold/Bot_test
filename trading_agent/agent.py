@@ -663,19 +663,26 @@ class TradingAgent:
         hold_time = (datetime.now() - self.position.open_time).total_seconds()
         min_hold = getattr(self.config.trading, 'min_hold_time', 120)
 
+        # Calculate dollar PnL for profit protection
+        dollar_pnl = self.position.unrealized_pnl
+
         if (
             self.ai_enabled
             and self.config.ai.ai_close_decisions
             and self.tick_count % self.config.ai.analysis_every_n_ticks == 0
             and hold_time >= min_hold  # Don't ask AI to close before min hold time
         ):
-            ai_close, ai_reason = await self.ai_brain.should_close_position(
-                self.candles, indicators, self.position, self.account.balance,
-                self.market_context,
-            )
-            if ai_close:
-                await self._close_position(ai_reason)
-                return
+            # If position is in profit → DON'T let AI close it, let SL/TP/trailing handle it
+            if dollar_pnl > 0.5:
+                logger.info(f"Position in profit (${dollar_pnl:.2f}) — skipping AI close check, letting TP/trailing run")
+            else:
+                ai_close, ai_reason = await self.ai_brain.should_close_position(
+                    self.candles, indicators, self.position, self.account.balance,
+                    self.market_context,
+                )
+                if ai_close:
+                    await self._close_position(ai_reason)
+                    return
 
             # Update AI reasoning for dashboard
             if self.ai_brain.last_analysis:
