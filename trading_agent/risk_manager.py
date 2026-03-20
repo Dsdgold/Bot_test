@@ -193,36 +193,67 @@ class RiskManager:
         if hold_time_seconds < min_hold:
             return False, ""
 
-        # After min hold time: move SL to break-even at $3+ profit
-        if dollar_pnl >= 3.0:
-            if position.side == Side.LONG:
-                be_sl = position.entry_price + 10
-                if be_sl > position.stop_loss:
-                    position.stop_loss = round(be_sl, 2)
-                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit, held {hold_time_seconds:.0f}s)")
-            else:
-                be_sl = position.entry_price - 10
-                if be_sl < position.stop_loss:
-                    position.stop_loss = round(be_sl, 2)
-                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit, held {hold_time_seconds:.0f}s)")
+        # Progressive trailing stop — lock in profits as they grow
+        # Each level locks a guaranteed profit even if price reverses
+        #
+        # Profit:  $0.50+ → SL = breakeven (no loss)
+        # Profit:  $1.00+ → SL = lock $0.30
+        # Profit:  $2.00+ → SL = lock $1.00
+        # Profit:  $3.00+ → SL = lock $1.80
+        # Profit:  $5.00+ → SL = lock $3.50
+        # Profit: $10.00+ → SL = lock $7.50
+        #
+        # Plus continuous 0.3% trailing at any profit level
 
-        # Trailing stop at $5+ profit
-        if dollar_pnl >= 5.0:
-            trail_pct = 0.004  # 0.4% trail
-            if position.side == Side.LONG:
-                new_sl = current_price * (1 - trail_pct)
-                if new_sl > position.stop_loss:
-                    position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
-            else:
-                new_sl = current_price * (1 + trail_pct)
-                if new_sl < position.stop_loss:
-                    position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
+        trailing_levels = [
+            (10.0, 0.75),  # $10+ profit → lock 75%
+            (5.0,  0.70),  # $5+ profit → lock 70%
+            (3.0,  0.60),  # $3+ profit → lock 60%
+            (2.0,  0.50),  # $2+ profit → lock 50%
+            (1.0,  0.30),  # $1+ profit → lock 30%
+            (0.50, 0.0),   # $0.50+ → breakeven (lock 0%)
+        ]
 
-        # Force close only at $10+ to bank big wins
-        if dollar_pnl >= 10.0:
-            return True, f"Big profit banked: ${dollar_pnl:.2f}"
+        for profit_threshold, lock_pct in trailing_levels:
+            if dollar_pnl >= profit_threshold:
+                # Calculate how much profit to lock
+                locked_dollar = dollar_pnl * lock_pct
+                # Convert locked profit to price distance from entry
+                lock_price_dist = (locked_dollar / position.leverage) / position.quantity
+
+                if position.side == Side.LONG:
+                    new_sl = position.entry_price + lock_price_dist
+                    if new_sl > position.stop_loss:
+                        position.stop_loss = round(new_sl, 2)
+                        logger.info(
+                            f"Progressive SL: profit ${dollar_pnl:.2f} → "
+                            f"lock ${locked_dollar:.2f} ({lock_pct*100:.0f}%) → "
+                            f"SL={position.stop_loss}"
+                        )
+                else:
+                    new_sl = position.entry_price - lock_price_dist
+                    if new_sl < position.stop_loss:
+                        position.stop_loss = round(new_sl, 2)
+                        logger.info(
+                            f"Progressive SL: profit ${dollar_pnl:.2f} → "
+                            f"lock ${locked_dollar:.2f} ({lock_pct*100:.0f}%) → "
+                            f"SL={position.stop_loss}"
+                        )
+                break  # Only apply highest matching level
+
+        # Additional tight trailing: 0.3% from current price (always tightening)
+        if dollar_pnl >= 1.0:
+            trail_pct = 0.003  # 0.3% trail
+            if position.side == Side.LONG:
+                trail_sl = current_price * (1 - trail_pct)
+                if trail_sl > position.stop_loss:
+                    position.stop_loss = round(trail_sl, 2)
+                    logger.info(f"Tight trail: ${dollar_pnl:.2f} profit → SL={position.stop_loss}")
+            else:
+                trail_sl = current_price * (1 + trail_pct)
+                if trail_sl < position.stop_loss:
+                    position.stop_loss = round(trail_sl, 2)
+                    logger.info(f"Tight trail: ${dollar_pnl:.2f} profit → SL={position.stop_loss}")
 
         return False, ""
 
