@@ -88,7 +88,7 @@ class ClaudeAIBrain:
                 },
                 json={
                     "model": self.model,
-                    "max_tokens": 256,
+                    "max_tokens": 512,
                     "system": SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                 },
