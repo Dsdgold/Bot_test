@@ -448,9 +448,13 @@ class TradingAgent:
         ai_sl_pct = getattr(signal, '_ai_stop_loss_pct', self.config.trading.stop_loss_pct)
         ai_tp_pct = getattr(signal, '_ai_take_profit_pct', self.config.trading.take_profit_pct)
 
-        # Enforce hard limits for safety
+        # Enforce hard limits for safety (SMALL ACCOUNT protection)
         ai_leverage = max(1, min(ai_leverage, self.config.trading.max_leverage))
-        ai_position_pct = max(0.05, min(ai_position_pct, 0.30))  # 5-30% of balance
+        ai_position_pct = max(0.05, min(ai_position_pct, 0.15))  # 5-15% of balance
+
+        # Enforce minimum 1:2 risk:reward
+        if ai_tp_pct < ai_sl_pct * 1.8:
+            ai_tp_pct = round(ai_sl_pct * 2.0, 2)
 
         # Calculate position size using AI-decided percentage
         balance = self.account.balance

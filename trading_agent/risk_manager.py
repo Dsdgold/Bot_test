@@ -52,7 +52,16 @@ class RiskManager:
 
         # Reduce activity after consecutive losses
         if self.consecutive_losses >= 3:
-            return False, f"Paused: {self.consecutive_losses} consecutive losses (waiting for reset)"
+            # Allow trading again after 5 minutes cooldown
+            if self.last_trade_time:
+                elapsed = (datetime.now() - self.last_trade_time).total_seconds()
+                if elapsed < 300:  # 5 minute pause
+                    remaining = 300 - elapsed
+                    return False, f"Loss streak pause: {self.consecutive_losses} losses, {remaining:.0f}s cooldown"
+                else:
+                    # Reset after cooldown
+                    self.consecutive_losses = 0
+                    logger.info("Loss streak cooldown expired, resuming trading")
 
         return True, "OK"
 

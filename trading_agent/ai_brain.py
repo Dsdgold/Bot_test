@@ -13,58 +13,77 @@ from .models import Candle, Indicators, MarketContext, Side, Signal, SignalStren
 
 logger = logging.getLogger("ai_brain")
 
-SYSTEM_PROMPT = """You are an aggressive AI trading agent controlling cryptocurrency futures on Bybit exchange. Your PRIMARY GOAL is to MULTIPLY CAPITAL as fast as possible through active, continuous trading.
+SYSTEM_PROMPT = """You are a disciplined AI trading agent managing a SMALL cryptocurrency futures account on Bybit. Your #1 goal is CAPITAL PRESERVATION while growing the account steadily.
 
-You are the brain. The bot executes YOUR decisions. You must ALWAYS be in a trade — either LONG or SHORT. There is ALWAYS an opportunity. Flat time is wasted time.
+You are managing a SMALL account ($20-100). Every dollar matters. One bad trade can wipe 20%+ of the account.
 
-YOUR MANDATE:
-1. ALWAYS choose LONG or SHORT — NEVER say WAIT unless the market is completely dead (near-zero volatility)
-2. Read the market microstructure: order book imbalance, volume spikes, momentum shifts
-3. Even small edges are worth trading — a 0.1% scalp with 20x leverage = 2% profit
-4. Set leverage aggressively: 10-20x is your default range
-5. Use the full position sizing range: 15-30% of balance
-6. Set tight stop-losses (0.3-1.0%) and reasonable take-profits (0.5-3.0%)
-7. When in doubt, follow the short-term momentum (last 5 candles direction)
+CORE RULES — NEVER BREAK THESE:
+1. PATIENCE > ACTION. Only trade when you see a clear edge. WAIT is your DEFAULT.
+2. NEVER trade against the higher timeframe trend (15m and 1h must agree)
+3. Risk:Reward minimum 1:2 — if SL is 0.5%, TP must be at least 1.0%
+4. Maximum leverage: 10x. Use 5x for uncertain setups.
+5. Maximum position size: 15% of balance
+6. Always have a clear invalidation point (stop-loss level)
 
-TRADING PHILOSOPHY:
-- Capital grows through VOLUME of trades, not waiting for perfect setups
-- Small consistent wins > rare big wins
-- The market always moves — ride the waves
-- Every candle pattern is a trading opportunity
-- Momentum is king for scalping — follow it
-- If RSI > 50 and EMA fast > slow → LONG
-- If RSI < 50 and EMA fast < slow → SHORT
-- Volume spike = trade NOW in the direction of the move
-- BB touch = mean reversion trade opportunity
-- Use higher timeframe trends only as bias, not as filter
+WHEN TO TRADE (ALL conditions must be met):
+- 1h trend and 15m trend align in the same direction
+- RSI is not in extreme territory AGAINST your trade (not >70 for longs, not <30 for shorts)
+- Volume is above average (volume spike confirms moves)
+- Order book imbalance supports your direction (>+10% for longs, <-10% for shorts)
+- MACD histogram supports direction
+- Price is not stuck in the middle of Bollinger Bands (wait for BB touch or breakout)
 
-LEVERAGE RULES:
-- 10x: Default for most trades
-- 15-20x: Clear trend with momentum confirmation
-- 20-30x: Strong confluence of multiple indicators
-- 5x: Only when indicators heavily conflict
+WHEN TO WAIT (any one = WAIT):
+- 15m and 1h trends disagree
+- RSI between 40-60 with no momentum (choppy market)
+- Low volume (below average)
+- Bollinger Band squeeze (volatility contraction — wait for breakout)
+- Just after a big move (don't chase)
+- Fear & Greed extreme (>80 or <15) — be extra cautious
+- Performance score below 0.7 (you're on a losing streak)
 
-RISK MANAGEMENT (minimal but present):
-- Stop-loss ALWAYS set (0.3-1.0% for scalps)
-- Max 30% of balance per trade
-- If last 3 trades lost, reduce to 10x leverage for 1 trade then resume
-- Cut losses fast, let winners run slightly
+LEVERAGE GUIDE:
+- 3-5x: Default for most trades. Your small account cannot handle more.
+- 5-7x: Strong confluence — all timeframes agree, volume spike, clear trend
+- 8-10x: ONLY for the best setups — perfect alignment, strong momentum, clear S/R levels
+- NEVER use more than 10x
+
+POSITION SIZING:
+- 5-10% of balance: Standard trade
+- 10-15%: High confidence only (>80%)
+- NEVER more than 15%
+
+STOP-LOSS (tight but not too tight):
+- 0.3-0.5%: Scalp trades with 7-10x leverage
+- 0.5-1.0%: Standard trades with 5x leverage
+- Use ATR or recent swing high/low for placement, not arbitrary percentages
+- Stop should be at a level where your thesis is INVALIDATED
+
+TAKE-PROFIT:
+- Minimum 2x your stop-loss distance
+- Use next support/resistance level as target
+- Let winners run with trailing stop when in profit
 
 You respond ONLY with valid JSON:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
   "confidence": 0-100,
-  "leverage": 5-30,
-  "position_size_pct": 10-30,
-  "stop_loss_pct": 0.3-1.5,
-  "take_profit_pct": 0.5-3.0,
+  "leverage": 3-10,
+  "position_size_pct": 5-15,
+  "stop_loss_pct": 0.3-1.0,
+  "take_profit_pct": 0.6-3.0,
   "reasoning": "Your analysis in 1-2 sentences",
   "key_factors": ["factor1", "factor2", "factor3"],
   "risk_level": "LOW" | "MEDIUM" | "HIGH",
-  "urgency": "HIGH"
+  "urgency": "LOW" | "MEDIUM" | "HIGH"
 }
 
-CRITICAL: You must decide LONG or SHORT. WAIT is almost never acceptable. Every tick is a chance to profit."""
+CRITICAL RULES:
+- WAIT is the CORRECT default. Only trade when multiple factors align.
+- If confidence < 65%, you MUST say WAIT.
+- If risk_level is HIGH, reduce leverage to 3-5x and position to 5%.
+- Quality over quantity. 2-3 good trades per day > 20 random trades.
+- Protect capital first. Profits come from NOT losing, not from trading more."""
 
 
 class ClaudeAIBrain:
@@ -128,7 +147,6 @@ class ClaudeAIBrain:
             content = data.get("content", [{}])[0].get("text", "")
 
             # Parse JSON response
-            # Strip markdown code block if present
             text = content.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -139,6 +157,23 @@ class ClaudeAIBrain:
             analysis = json.loads(text)
             self.last_analysis = analysis
             self.analysis_count += 1
+
+            # Enforce safety limits
+            analysis["leverage"] = min(int(analysis.get("leverage", 5)), 10)
+            analysis["position_size_pct"] = min(float(analysis.get("position_size_pct", 10)), 15)
+            analysis["stop_loss_pct"] = max(float(analysis.get("stop_loss_pct", 0.5)), 0.2)
+
+            # Enforce minimum risk:reward of 1:2
+            sl = analysis["stop_loss_pct"]
+            tp = float(analysis.get("take_profit_pct", sl * 2))
+            if tp < sl * 1.8:
+                tp = round(sl * 2.0, 2)
+                analysis["take_profit_pct"] = tp
+
+            # Force WAIT if confidence too low
+            if analysis.get("confidence", 0) < 60 and analysis.get("decision") != "WAIT":
+                logger.info(f"AI confidence {analysis['confidence']}% too low, forcing WAIT")
+                analysis["decision"] = "WAIT"
 
             logger.info(
                 f"Claude AI: {analysis['decision']} | "
@@ -168,7 +203,6 @@ class ClaudeAIBrain:
         best_session: str = "US",
     ) -> str:
         """Build the analysis prompt with all market data."""
-        # Recent price action (last 20 candles)
         recent = candles[-20:] if len(candles) >= 20 else candles
         price_data = []
         for c in recent:
@@ -181,48 +215,36 @@ class ClaudeAIBrain:
                 "volume": round(c.volume, 2),
             })
 
-        # Price trend (last 5 candles direction)
         last5 = candles[-5:]
         trend_moves = []
         for i in range(1, len(last5)):
             change_pct = ((last5[i].close - last5[i-1].close) / last5[i-1].close) * 100
             trend_moves.append(round(change_pct, 3))
 
-        # Current price context
         current_price = candles[-1].close if candles else 0
         high_24h = max(c.high for c in candles[-60:]) if len(candles) >= 60 else max(c.high for c in candles)
         low_24h = min(c.low for c in candles[-60:]) if len(candles) >= 60 else min(c.low for c in candles)
         price_range_pct = ((high_24h - low_24h) / low_24h) * 100 if low_24h > 0 else 0
 
-        prompt = f"""MARKET DATA SNAPSHOT (1-min candles):
+        prompt = f"""MARKET DATA (1-min candles):
 
-CURRENT PRICE: {current_price:.2f}
-PRICE RANGE (recent): {low_24h:.2f} - {high_24h:.2f} ({price_range_pct:.2f}%)
-LAST 5 CANDLE MOVES (%): {trend_moves}
+PRICE: {current_price:.2f} | RANGE: {low_24h:.2f} - {high_24h:.2f} ({price_range_pct:.2f}%)
+LAST 5 MOVES (%): {trend_moves}
 
-TECHNICAL INDICATORS:
-- RSI(14): {indicators.rsi:.2f} {'⚠️ OVERSOLD' if indicators.rsi < 30 else '⚠️ OVERBOUGHT' if indicators.rsi > 70 else ''}
-- EMA(9): {indicators.ema_fast:.2f} {'> price ↓' if indicators.ema_fast > current_price else '< price ↑'}
-- EMA(21): {indicators.ema_slow:.2f}
-- EMA(50): {indicators.ema_trend:.2f}
-- EMA Cross: {'BULLISH (fast > slow)' if indicators.ema_fast > indicators.ema_slow else 'BEARISH (fast < slow)'}
-- MACD: {indicators.macd:.6f}
-- MACD Signal: {indicators.macd_signal:.6f}
-- MACD Histogram: {indicators.macd_histogram:.6f} {'↑ growing' if indicators.macd_histogram > 0 else '↓ declining'}
-- BB Upper: {indicators.bb_upper:.2f}
-- BB Middle: {indicators.bb_middle:.2f}
-- BB Lower: {indicators.bb_lower:.2f}
-- BB Width: {indicators.bb_width:.4f} {'⚠️ SQUEEZE' if indicators.bb_width < 0.02 else ''}
-- Price vs BB: {'ABOVE upper ⚠️' if current_price >= indicators.bb_upper else 'BELOW lower ⚠️' if current_price <= indicators.bb_lower else f'at {((current_price - indicators.bb_lower) / (indicators.bb_upper - indicators.bb_lower) * 100):.0f}% of BB range' if indicators.bb_upper != indicators.bb_lower else 'middle'}
-- VWAP: {indicators.vwap:.2f} ({'price ABOVE' if current_price > indicators.vwap else 'price BELOW'})
-- ATR: {indicators.atr:.2f} ({(indicators.atr/current_price*100):.3f}% of price)
-- Volume vs avg: {(indicators.current_volume / indicators.volume_sma):.1f}x {'⚠️ SPIKE' if indicators.volume_sma > 0 and indicators.current_volume > indicators.volume_sma * 1.5 else ''}
+INDICATORS:
+- RSI(14): {indicators.rsi:.2f} {'OVERSOLD' if indicators.rsi < 30 else 'OVERBOUGHT' if indicators.rsi > 70 else ''}
+- EMA(9): {indicators.ema_fast:.2f} | EMA(21): {indicators.ema_slow:.2f} | EMA(50): {indicators.ema_trend:.2f}
+- EMA Cross: {'BULLISH' if indicators.ema_fast > indicators.ema_slow else 'BEARISH'}
+- MACD: {indicators.macd:.6f} | Signal: {indicators.macd_signal:.6f} | Hist: {indicators.macd_histogram:.6f}
+- BB: [{indicators.bb_lower:.2f} - {indicators.bb_middle:.2f} - {indicators.bb_upper:.2f}] Width: {indicators.bb_width:.4f} {'SQUEEZE!' if indicators.bb_width < 0.02 else ''}
+- VWAP: {indicators.vwap:.2f} ({'ABOVE' if current_price > indicators.vwap else 'BELOW'})
+- ATR: {indicators.atr:.2f} ({(indicators.atr/current_price*100):.3f}%)
+- Volume: {(indicators.current_volume / indicators.volume_sma):.1f}x avg {'SPIKE!' if indicators.volume_sma > 0 and indicators.current_volume > indicators.volume_sma * 1.5 else ''}
 
-RECENT CANDLES (newest last):
+RECENT CANDLES (last 10):
 {json.dumps(price_data[-10:], indent=1)}"""
 
         if position:
-            pnl_pct = 0
             if position.side == Side.LONG:
                 pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
             else:
@@ -231,75 +253,48 @@ RECENT CANDLES (newest last):
             prompt += f"""
 
 OPEN POSITION:
-- Side: {position.side.value}
-- Entry: {position.entry_price:.2f}
-- Current PnL: {pnl_pct:.3f}% (leveraged: {pnl_pct * position.leverage:.2f}%)
-- Stop Loss: {position.stop_loss:.2f}
-- Take Profit: {position.take_profit:.2f}
-- Leverage: {position.leverage}x
+- {position.side.value} @ {position.entry_price:.2f} | Leverage: {position.leverage}x
+- PnL: {pnl_pct:.3f}% (leveraged: {pnl_pct * position.leverage:.2f}%)
+- SL: {position.stop_loss:.2f} | TP: {position.take_profit:.2f}
 
-Should I HOLD or CLOSE this position? If CLOSE, set decision to opposite direction."""
+Should I HOLD or CLOSE?"""
 
         if recent_trades:
             last3 = recent_trades[-3:]
-            trades_info = []
-            for t in last3:
-                trades_info.append(f"  {t.side.value}: entry={t.entry_price:.2f} exit={t.exit_price:.2f} pnl={t.pnl:+.2f} ({t.reason})")
+            trades_info = [f"  {t.side.value}: {t.pnl:+.2f} USDT ({t.reason})" for t in last3]
             prompt += f"\n\nLAST TRADES:\n" + "\n".join(trades_info)
 
-        # Market context (funding, OI, order book, multi-timeframe)
         if market_context:
             prompt += f"""
 
-FUNDING RATE & OPEN INTEREST:
-- Funding Rate: {market_context.funding_rate:.6f} ({'longs pay shorts' if market_context.funding_rate > 0 else 'shorts pay longs' if market_context.funding_rate < 0 else 'neutral'})
-- Open Interest Change: {market_context.open_interest_change:+.2f}% {'(rising = new money entering)' if market_context.open_interest_change > 0 else '(falling = positions closing)'}
+MARKET CONTEXT:
+- Funding: {market_context.funding_rate:.6f} ({'longs pay' if market_context.funding_rate > 0 else 'shorts pay'})
+- OI Change: {market_context.open_interest_change:+.2f}%
+- Book Imbalance: {market_context.book_imbalance:+.1f}% ({'buyers dominate' if market_context.book_imbalance > 10 else 'sellers dominate' if market_context.book_imbalance < -10 else 'balanced'})
+- Bid Wall: {market_context.bid_wall_price:.2f} ({market_context.bid_wall_size:.0f}) | Ask Wall: {market_context.ask_wall_price:.2f} ({market_context.ask_wall_size:.0f})
 
-ORDER BOOK ANALYSIS:
-- Book Imbalance: {market_context.book_imbalance:+.1f}% ({'more buyers' if market_context.book_imbalance > 0 else 'more sellers'})
-- Largest Bid Wall: {market_context.bid_wall_price:.2f} (size: {market_context.bid_wall_size:.2f}) = SUPPORT
-- Largest Ask Wall: {market_context.ask_wall_price:.2f} (size: {market_context.ask_wall_size:.2f}) = RESISTANCE
-- Total Bid Volume: {market_context.bid_total:.2f} | Total Ask Volume: {market_context.ask_total:.2f}
+HIGHER TIMEFRAME TRENDS (CRITICAL - do NOT trade against these):
+- 5min:  {market_context.trend_5m} (RSI {market_context.rsi_5m:.0f})
+- 15min: {market_context.trend_15m} (RSI {market_context.rsi_15m:.0f})
+- 1hour: {market_context.trend_1h} (RSI {market_context.rsi_1h:.0f})
 
-MULTI-TIMEFRAME TRENDS (critical for confirming 1m signals):
-- 5min:  Trend={market_context.trend_5m}  RSI={market_context.rsi_5m:.1f}
-- 15min: Trend={market_context.trend_15m} RSI={market_context.rsi_15m:.1f}
-- 1hour: Trend={market_context.trend_1h}  RSI={market_context.rsi_1h:.1f}
-- Use as directional BIAS only. Scalps can go against higher TF trend.
+Session: {market_context.trading_session} | Fear&Greed: {market_context.fear_greed_index} ({market_context.fear_greed_label})"""
 
-TRADING SESSION: {market_context.trading_session}
-- ASIA (00-08 UTC): moderate volatility
-- EUROPE (08-14 UTC): increasing volatility
-- US (14-21 UTC): highest volatility, best for scalping
-- OFF_HOURS (21-00 UTC): low volatility, avoid large positions
-
-FEAR & GREED INDEX: {market_context.fear_greed_index}/100 ({market_context.fear_greed_label})
-- 0-25 = Extreme Fear → contrarian BUY signal (market oversold)
-- 25-45 = Fear → cautious buying opportunity
-- 45-55 = Neutral
-- 55-75 = Greed → reduce position sizes, tighter SL
-- 75-100 = Extreme Greed → contrarian SELL signal (market overbought)"""
-
-        prompt += f"\n\nACCOUNT BALANCE: ${balance:.2f}"
-
-        # Auto-tuning data
         prompt += f"""
 
-PERFORMANCE AUTO-TUNE:
-- Performance Score: {performance_score:.2f} (0.5=cold streak, 1.0=normal, 1.5=hot streak)
-- Best Session: {best_session}
-- RULE: If score < 0.7, reduce leverage and position size. If score > 1.2, you can be slightly more aggressive."""
+ACCOUNT: ${balance:.2f} (SMALL ACCOUNT — protect capital!)
+Performance Score: {performance_score:.2f} {'(LOSING STREAK - be extra careful!)' if performance_score < 0.8 else '(normal)' if performance_score < 1.2 else '(good streak)'}"""
 
         if recent_trades:
             wins = sum(1 for t in recent_trades if t.pnl > 0)
-            prompt += f"\n- Recent win rate: {wins}/{len(recent_trades)} ({wins/len(recent_trades)*100:.0f}%)"
+            prompt += f"\nRecent: {wins}/{len(recent_trades)} wins"
 
-        prompt += "\n\nYou have FULL CONTROL. Your #1 goal is MULTIPLYING CAPITAL through active trading. You MUST choose LONG or SHORT — WAIT is not acceptable unless volatility is literally zero. Decide NOW. Respond ONLY with JSON."
+        prompt += "\n\nAnalyze carefully. WAIT if uncertain. Respond with JSON only."
 
         return prompt
 
     def get_signal_from_analysis(self, analysis: dict, base_signal: Signal) -> Signal:
-        """Convert Claude's analysis into a trading Signal with full AI control."""
+        """Convert Claude's analysis into a trading Signal."""
         if not analysis:
             return base_signal
 
@@ -316,32 +311,28 @@ PERFORMANCE AUTO-TUNE:
         if decision == "LONG":
             signal.side = Side.LONG
             signal.confidence = confidence
-            signal.strength = SignalStrength.STRONG_BUY if confidence >= 50 else SignalStrength.BUY
+            signal.strength = SignalStrength.STRONG_BUY if confidence >= 75 else SignalStrength.BUY
         elif decision == "SHORT":
             signal.side = Side.SHORT
             signal.confidence = confidence
-            signal.strength = SignalStrength.STRONG_SELL if confidence >= 50 else SignalStrength.SELL
+            signal.strength = SignalStrength.STRONG_SELL if confidence >= 75 else SignalStrength.SELL
         else:
-            # AI said WAIT — still use technical signal direction with low confidence
             signal.side = None
             signal.confidence = confidence
             signal.strength = SignalStrength.NEUTRAL
 
-        # Combine reasons: AI reasoning + technical factors
         signal.reasons = [f"AI: {reasoning}"] + [f"• {r}" for r in reasons]
 
-        # Store AI-decided parameters on the signal
-        signal._ai_leverage = int(analysis.get("leverage", 5))
-        signal._ai_position_size_pct = float(analysis.get("position_size_pct", 10)) / 100.0
-        signal._ai_stop_loss_pct = float(analysis.get("stop_loss_pct", 1.5))
-        signal._ai_take_profit_pct = float(analysis.get("take_profit_pct", 3.0))
+        # Store AI parameters (with enforced limits)
+        signal._ai_leverage = min(int(analysis.get("leverage", 5)), 10)
+        signal._ai_position_size_pct = min(float(analysis.get("position_size_pct", 10)), 15) / 100.0
+        signal._ai_stop_loss_pct = float(analysis.get("stop_loss_pct", 0.5))
+        signal._ai_take_profit_pct = float(analysis.get("take_profit_pct", 1.0))
         signal._ai_risk_level = analysis.get("risk_level", "MEDIUM")
         signal._ai_urgency = analysis.get("urgency", "LOW")
 
-        # Add AI params to reasons for dashboard visibility
-        signal.reasons.append(f"AI Leverage: {signal._ai_leverage}x")
-        signal.reasons.append(f"AI SL: {signal._ai_stop_loss_pct}% / TP: {signal._ai_take_profit_pct}%")
-        signal.reasons.append(f"AI Position: {signal._ai_position_size_pct*100:.0f}% of balance")
+        signal.reasons.append(f"Leverage: {signal._ai_leverage}x | SL: {signal._ai_stop_loss_pct}% | TP: {signal._ai_take_profit_pct}%")
+        signal.reasons.append(f"Size: {signal._ai_position_size_pct*100:.0f}% of balance")
 
         return signal
 
@@ -360,15 +351,15 @@ PERFORMANCE AUTO-TUNE:
 
         decision = analysis.get("decision", "WAIT")
 
-        # If AI says opposite direction or WAIT with low confidence, close
+        # If AI says opposite direction, close
         if position.side == Side.LONG and decision == "SHORT":
             return True, f"AI reversal: {analysis.get('reasoning', 'trend change')}"
         if position.side == Side.SHORT and decision == "LONG":
             return True, f"AI reversal: {analysis.get('reasoning', 'trend change')}"
 
-        # If AI confidence for holding is very low
-        if decision == "WAIT" and analysis.get("confidence", 0) < 30:
-            return True, f"AI low confidence: {analysis.get('reasoning', 'uncertain market')}"
+        # If AI says WAIT with very low confidence in current direction
+        if decision == "WAIT" and analysis.get("confidence", 0) < 25:
+            return True, f"AI low confidence: {analysis.get('reasoning', 'uncertain')}"
 
         return False, ""
 

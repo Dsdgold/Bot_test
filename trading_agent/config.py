@@ -29,24 +29,24 @@ class TradingConfig:
     symbol: str = os.getenv("TRADING_SYMBOL", "BTCUSDT")
 
     # Leverage settings
-    leverage: int = int(os.getenv("TRADING_LEVERAGE", "20"))
-    max_leverage: int = 50
+    leverage: int = int(os.getenv("TRADING_LEVERAGE", "5"))
+    max_leverage: int = 10
 
     # Position sizing
-    max_position_pct: float = 0.3  # Max 30% of balance per position
+    max_position_pct: float = 0.15  # Max 15% of balance per position
     min_order_usdt: float = 5.0
 
     # Risk management
-    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "1.5"))
-    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "3.0"))
-    trailing_stop_pct: float = 0.5
-    max_daily_loss_pct: float = 10.0  # Stop trading after 10% daily loss
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.5"))
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "1.0"))
+    trailing_stop_pct: float = 0.3
+    max_daily_loss_pct: float = 5.0  # Stop trading after 5% daily loss
     max_open_positions: int = 1
 
-    # Scalping timing
-    candle_interval: str = "Min1"  # 1-minute candles for scalping
-    analysis_interval: int = 5  # Analyze every 5 seconds
-    cooldown_after_trade: int = 5  # Wait 5s after closing a trade
+    # Timing
+    candle_interval: str = "Min1"  # 1-minute candles
+    analysis_interval: int = 10  # Analyze every 10 seconds (less overtrading)
+    cooldown_after_trade: int = 60  # Wait 60s after closing a trade
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
@@ -63,7 +63,7 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "20"))
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "65"))
 
 
 @dataclass
