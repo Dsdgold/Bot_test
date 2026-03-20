@@ -131,25 +131,27 @@ class RiskManager:
         # Calculate actual dollar PnL
         dollar_pnl = pnl_pct / 100 * position.entry_price * position.quantity * position.leverage
 
-        # Aggressive trailing — based on DOLLAR profit, not just %
-        # On a $64 account, $2+ profit is significant — lock it in TIGHT
-        if dollar_pnl >= 2.0:
-            # Ultra tight: 0.15% from current price — protect those dollars
-            trail_pct = 0.0015
-            if position.side == Side.LONG:
-                new_sl = current_price * (1 - trail_pct)
-                if new_sl > position.stop_loss:
-                    position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
-            else:
-                new_sl = current_price * (1 + trail_pct)
-                if new_sl < position.stop_loss:
-                    position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
+        # FORCED TAKE PROFIT — on a small account, $3+ is a WIN. TAKE IT.
+        # AI keeps holding and giving back profits. This overrides AI.
+        if dollar_pnl >= 3.0:
+            return True, f"Dollar TP hit: ${dollar_pnl:.2f} profit — BANKED!"
 
-        elif dollar_pnl >= 0.50:
-            # Tight: 0.25% — start protecting early
-            trail_pct = 0.0025
+        # At $1.50+ profit, move SL to break-even minimum
+        if dollar_pnl >= 1.50:
+            if position.side == Side.LONG:
+                be_sl = position.entry_price + 5  # Tiny profit guaranteed
+                if be_sl > position.stop_loss:
+                    position.stop_loss = round(be_sl, 2)
+                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit)")
+            else:
+                be_sl = position.entry_price - 5
+                if be_sl < position.stop_loss:
+                    position.stop_loss = round(be_sl, 2)
+                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit)")
+
+        # At $0.50+ start tight trailing
+        if dollar_pnl >= 0.50:
+            trail_pct = 0.002  # 0.2% trail
             if position.side == Side.LONG:
                 new_sl = current_price * (1 - trail_pct)
                 if new_sl > position.stop_loss:
