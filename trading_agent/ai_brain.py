@@ -135,7 +135,7 @@ class ClaudeAIBrain:
             data = resp.json()
             content = data.get("content", [{}])[0].get("text", "")
 
-            # Parse JSON response
+            # Parse JSON response - handle Haiku quirks
             text = content.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -143,15 +143,30 @@ class ClaudeAIBrain:
                     text = text[:-3]
                 text = text.strip()
 
+            # Extract first JSON object if there's extra text
+            brace_count = 0
+            json_end = 0
+            for i, ch in enumerate(text):
+                if ch == '{':
+                    brace_count += 1
+                elif ch == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            if json_end > 0:
+                text = text[:json_end]
+
             analysis = json.loads(text)
             self.last_analysis = analysis
             self.analysis_count += 1
 
-            # AI has full control — no overrides
-            analysis["leverage"] = int(analysis.get("leverage", 5))
-            analysis["position_size_pct"] = float(analysis.get("position_size_pct", 10))
-            analysis["stop_loss_pct"] = float(analysis.get("stop_loss_pct", 0.5))
-            analysis["take_profit_pct"] = float(analysis.get("take_profit_pct", 1.0))
+            # AI has full control — safe type conversion
+            analysis["leverage"] = int(float(analysis.get("leverage") or 10))
+            analysis["position_size_pct"] = float(analysis.get("position_size_pct") or 15)
+            analysis["stop_loss_pct"] = float(analysis.get("stop_loss_pct") or 0.5)
+            analysis["take_profit_pct"] = float(analysis.get("take_profit_pct") or 1.0)
+            analysis["confidence"] = float(analysis.get("confidence") or 50)
 
             logger.info(
                 f"Claude AI: {analysis['decision']} | "
