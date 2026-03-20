@@ -68,6 +68,15 @@ class TradingConfig:
     # Minimum hold time in seconds — prevent closing trades too early
     min_hold_time: int = int(os.getenv("MIN_HOLD_TIME", "120"))
 
+    # Progressive profit locking (replaces legacy breakeven/trailing/force-close)
+    progressive_stop_enabled: bool = os.getenv("PROGRESSIVE_STOP_ENABLED", "true").lower() == "true"
+    profit_step_net_usd: float = float(os.getenv("PROFIT_STEP_NET_USD", "4.0"))
+    lock_step_net_usd: float = float(os.getenv("LOCK_STEP_NET_USD", "1.0"))
+    taker_fee_rate: float = float(os.getenv("TAKER_FEE_RATE", "0.00055"))
+    slippage_buffer_usd: float = float(os.getenv("SLIPPAGE_BUFFER_USD", "0.40"))
+    min_stop_improvement_usd: float = float(os.getenv("MIN_STOP_IMPROVEMENT_USD", "0.25"))
+    disable_legacy_profit_protection: bool = os.getenv("DISABLE_LEGACY_PROFIT_PROTECTION", "true").lower() == "true"
+
 
 @dataclass
 class AIConfig:

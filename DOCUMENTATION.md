@@ -168,9 +168,17 @@ Scoring system (max 100 punktów):
 | Loss streak | 3 straty → 30 min pauza | Reset po pauzie |
 | Daily loss limit | 25% | Stop trading na dziś |
 | Min hold time | 120s | Nie zamykaj przed 2 min |
-| Breakeven SL | @ $3+ profit | SL → entry + $10 |
-| Trailing stop | @ $5+ profit | 0.4% trail |
-| Force close | @ $10+ profit | Bank big win |
+| Progressive stop lock | step-based | Co +$4 net open PnL lockuje +$1 netto (konfigurowalne przez .env) |
+
+**Progressive profit locking (domyślnie włączony):**
+- Oblicza gross open PnL, fee buffer (entry fee + exit fee + slippage), net open PnL
+- Kroki: `steps = floor(net_pnl / PROFIT_STEP_NET_USD)`
+- Lockowany zysk: `locked_net = steps * LOCK_STEP_NET_USD`
+- Nowy SL zabezpiecza `fee_buffer + locked_net` w gross PnL
+- Przykład (domyślne 4.0/1.0): +$4 netto → lock $1, +$8 → lock $2, +$12 → lock $3
+- Agresywny wariant (2.0/0.5): +$2 netto → lock $0.50, +$4 → lock $1, +$6 → lock $1.50
+- SL nigdy się nie cofa, minimalna poprawa `MIN_STOP_IMPROVEMENT_USD`
+- Legacy system (breakeven/trailing/force-close) dostępny pod flagą konfiguracyjną
 
 **Fee-aware RR:**
 - Bybit taker fee: 0.055% per stronę
@@ -283,6 +291,13 @@ Czyste obliczenia matematyczne bez side effects.
 | `ANALYSIS_INTERVAL` | 60s | Interwał analizy |
 | `COOLDOWN_AFTER_TRADE` | 120s | Cooldown między trade'ami |
 | `MAX_DAILY_LOSS_PCT` | 25% | Max dzienna strata |
+| `PROGRESSIVE_STOP_ENABLED` | true | Włącz progresywny locking zysku |
+| `PROFIT_STEP_NET_USD` | 4.0 | Co ile $ netto PnL przesuwać SL |
+| `LOCK_STEP_NET_USD` | 1.0 | Ile $ netto lockować na każdy krok |
+| `TAKER_FEE_RATE` | 0.00055 | Bybit taker fee rate (0.055%) |
+| `SLIPPAGE_BUFFER_USD` | 0.40 | Bufor na slippage w USD |
+| `MIN_STOP_IMPROVEMENT_USD` | 0.25 | Min poprawa SL żeby aktualizować |
+| `DISABLE_LEGACY_PROFIT_PROTECTION` | true | Wyłącz stary breakeven/trailing/force-close |
 | `PAPER_TRADING` | false | True = tryb demo |
 | `DASHBOARD_PORT` | 8001 | Port dashboardu |
 
@@ -324,6 +339,15 @@ STOP_LOSS_PCT=1.0
 TAKE_PROFIT_PCT=3.0
 MIN_CONFIDENCE=40
 MIN_HOLD_TIME=120
+
+# Progressive profit locking
+PROGRESSIVE_STOP_ENABLED=true
+PROFIT_STEP_NET_USD=4.0
+LOCK_STEP_NET_USD=1.0
+TAKER_FEE_RATE=0.00055
+SLIPPAGE_BUFFER_USD=0.40
+MIN_STOP_IMPROVEMENT_USD=0.25
+DISABLE_LEGACY_PROFIT_PROTECTION=true
 
 # System
 PAPER_TRADING=false
@@ -379,7 +403,9 @@ START TICK
     │   ├── YES → Monitor position
     │   │         ├── SL hit? → CLOSE
     │   │         ├── TP hit? → CLOSE
-    │   │         ├── Trailing stop moved? → Sync to Bybit
+    │   │         ├── Progressive stop: gross PnL → fee buffer → net PnL
+    │   │         │   → steps = floor(net/step) → lock net → new SL
+    │   │         │   → sync to Bybit if SL improved
     │   │         ├── AI says CLOSE/REVERSE? → CLOSE
     │   │         └── Otherwise → HOLD
     │   │
@@ -431,9 +457,7 @@ START TICK
 | 3 straty z rzędu | 30 min pauza | Anty-tilt |
 | Min hold time | 120s | Nie zamykaj za wcześnie |
 | Fee-adjusted RR | >= 1.3 | Nie wchodź w złe trades |
-| Breakeven SL | @ $3 profit | Zabezpiecz zysk |
-| Trailing stop | @ $5 profit | 0.4% trail |
-| Force close | @ $10 profit | Bank big win |
+| Progressive stop lock | +$4 net PnL/krok | Lockuje +$1 netto/krok (konfigurowalne) |
 
 ---
 

@@ -12,7 +12,9 @@ from .models import AccountState, Indicators, Position, Side, Trade
 logger = logging.getLogger("risk_manager")
 
 # Bybit taker fee for USDT perpetuals
-TAKER_FEE_PCT = 0.055  # 0.055% per side
+TAKER_FEE_PCT = 0.055  # 0.055% per side (used in RR calculation)
+
+import math
 
 
 class RiskManager:
@@ -186,39 +188,154 @@ class RiskManager:
         if position.side == Side.SHORT and current_price <= position.take_profit:
             return True, f"Take-profit hit at {current_price:.2f}"
 
-        # Calculate actual dollar PnL
+        # Calculate actual dollar PnL (leveraged)
         dollar_pnl = pnl_pct / 100 * position.entry_price * position.quantity * position.leverage
 
         # Don't apply trailing/breakeven logic until minimum hold time passed
         if hold_time_seconds < min_hold:
             return False, ""
 
-        # Progressive trailing stop — lock in profits as they grow
-        # Each level locks a guaranteed profit even if price reverses
-        #
-        # Profit:  $0.50+ → SL = breakeven (no loss)
-        # Profit:  $1.00+ → SL = lock $0.30
-        # Profit:  $2.00+ → SL = lock $1.00
-        # Profit:  $3.00+ → SL = lock $1.80
-        # Profit:  $5.00+ → SL = lock $3.50
-        # Profit: $10.00+ → SL = lock $7.50
-        #
-        # Plus continuous 0.3% trailing at any profit level
+        # ── Progressive profit locking ──
+        if getattr(self.config, 'progressive_stop_enabled', True):
+            self._apply_progressive_stop(position, current_price, dollar_pnl)
+        elif not getattr(self.config, 'disable_legacy_profit_protection', True):
+            self._apply_legacy_trailing(position, current_price, dollar_pnl)
 
+        return False, ""
+
+    # ── Progressive step-based profit locking ──────────────────────────
+
+    def calculate_progressive_stop(
+        self,
+        entry_price: float,
+        quantity: float,
+        leverage: int,
+        side: Side,
+        current_price: float,
+        current_sl: float,
+    ) -> Optional[float]:
+        """Calculate new SL based on progressive net-PnL step locking.
+
+        Pure function — does not mutate position. Returns new SL price
+        or None if no update is warranted.
+        """
+        fee_rate = getattr(self.config, 'taker_fee_rate', 0.00055)
+        slippage = getattr(self.config, 'slippage_buffer_usd', 0.40)
+        step = getattr(self.config, 'profit_step_net_usd', 4.0)
+        lock = getattr(self.config, 'lock_step_net_usd', 1.0)
+        min_improve = getattr(self.config, 'min_stop_improvement_usd', 0.25)
+
+        # Gross open PnL (leveraged)
+        if side == Side.LONG:
+            gross_pnl = (current_price - entry_price) * quantity * leverage
+        else:
+            gross_pnl = (entry_price - current_price) * quantity * leverage
+
+        if gross_pnl <= 0:
+            return None
+
+        # Fee buffer: entry fee + estimated exit fee + slippage
+        entry_fee = entry_price * quantity * fee_rate
+        exit_fee = current_price * quantity * fee_rate
+        fee_buffer = entry_fee + exit_fee + slippage
+
+        # Net open PnL
+        net_pnl = gross_pnl - fee_buffer
+        if step <= 0:
+            return None
+
+        steps = int(math.floor(net_pnl / step))
+        if steps < 1:
+            return None
+
+        locked_net = steps * lock
+        locked_gross = fee_buffer + locked_net
+
+        # Convert locked gross profit to price distance from entry
+        # locked_gross = price_dist * quantity * leverage  →  price_dist = locked_gross / (qty * lev)
+        price_dist = locked_gross / (quantity * leverage)
+
+        if side == Side.LONG:
+            new_sl = entry_price + price_dist
+            # Must be better (higher) than current SL
+            if new_sl <= current_sl:
+                return None
+            # Must stay below current price
+            if new_sl >= current_price:
+                return None
+            # Check minimum improvement in USD terms
+            improvement_usd = (new_sl - current_sl) * quantity * leverage
+        else:
+            new_sl = entry_price - price_dist
+            # Must be better (lower) than current SL
+            if new_sl >= current_sl:
+                return None
+            # Must stay above current price
+            if new_sl <= current_price:
+                return None
+            improvement_usd = (current_sl - new_sl) * quantity * leverage
+
+        if improvement_usd < min_improve:
+            return None
+
+        return round(new_sl, 2)
+
+    def _apply_progressive_stop(
+        self, position: Position, current_price: float, dollar_pnl: float
+    ):
+        """Apply progressive stop locking to a live position."""
+        new_sl = self.calculate_progressive_stop(
+            entry_price=position.entry_price,
+            quantity=position.quantity,
+            leverage=position.leverage,
+            side=position.side,
+            current_price=current_price,
+            current_sl=position.stop_loss,
+        )
+        if new_sl is None:
+            return
+
+        old_sl = position.stop_loss
+        position.stop_loss = new_sl
+
+        # Detailed log
+        fee_rate = getattr(self.config, 'taker_fee_rate', 0.00055)
+        slippage = getattr(self.config, 'slippage_buffer_usd', 0.40)
+        step = getattr(self.config, 'profit_step_net_usd', 4.0)
+        lock = getattr(self.config, 'lock_step_net_usd', 1.0)
+
+        entry_fee = position.entry_price * position.quantity * fee_rate
+        exit_fee = current_price * position.quantity * fee_rate
+        fee_buffer = entry_fee + exit_fee + slippage
+        net_pnl = dollar_pnl - fee_buffer
+        steps = int(math.floor(net_pnl / step))
+        locked_net = steps * lock
+
+        logger.info(
+            f"Progressive SL UPDATE | gross=${dollar_pnl:.2f} fee_buf=${fee_buffer:.2f} "
+            f"net=${net_pnl:.2f} steps={steps} locked_net=${locked_net:.2f} | "
+            f"SL {old_sl:.2f} → {new_sl:.2f}"
+        )
+
+    # ── Legacy trailing (kept behind config flag) ─────────────────────
+
+    def _apply_legacy_trailing(
+        self, position: Position, current_price: float, dollar_pnl: float
+    ):
+        """Old percentage-based trailing stop. Active only when
+        progressive_stop_enabled=false AND disable_legacy_profit_protection=false."""
         trailing_levels = [
-            (10.0, 0.75),  # $10+ profit → lock 75%
-            (5.0,  0.70),  # $5+ profit → lock 70%
-            (3.0,  0.60),  # $3+ profit → lock 60%
-            (2.0,  0.50),  # $2+ profit → lock 50%
-            (1.0,  0.30),  # $1+ profit → lock 30%
-            (0.50, 0.0),   # $0.50+ → breakeven (lock 0%)
+            (10.0, 0.75),
+            (5.0,  0.70),
+            (3.0,  0.60),
+            (2.0,  0.50),
+            (1.0,  0.30),
+            (0.50, 0.0),
         ]
 
         for profit_threshold, lock_pct in trailing_levels:
             if dollar_pnl >= profit_threshold:
-                # Calculate how much profit to lock
                 locked_dollar = dollar_pnl * lock_pct
-                # Convert locked profit to price distance from entry
                 lock_price_dist = (locked_dollar / position.leverage) / position.quantity
 
                 if position.side == Side.LONG:
@@ -226,7 +343,7 @@ class RiskManager:
                     if new_sl > position.stop_loss:
                         position.stop_loss = round(new_sl, 2)
                         logger.info(
-                            f"Progressive SL: profit ${dollar_pnl:.2f} → "
+                            f"Legacy SL: profit ${dollar_pnl:.2f} → "
                             f"lock ${locked_dollar:.2f} ({lock_pct*100:.0f}%) → "
                             f"SL={position.stop_loss}"
                         )
@@ -235,27 +352,24 @@ class RiskManager:
                     if new_sl < position.stop_loss:
                         position.stop_loss = round(new_sl, 2)
                         logger.info(
-                            f"Progressive SL: profit ${dollar_pnl:.2f} → "
+                            f"Legacy SL: profit ${dollar_pnl:.2f} → "
                             f"lock ${locked_dollar:.2f} ({lock_pct*100:.0f}%) → "
                             f"SL={position.stop_loss}"
                         )
-                break  # Only apply highest matching level
+                break
 
-        # Additional tight trailing: 0.3% from current price (always tightening)
         if dollar_pnl >= 1.0:
-            trail_pct = 0.003  # 0.3% trail
+            trail_pct = 0.003
             if position.side == Side.LONG:
                 trail_sl = current_price * (1 - trail_pct)
                 if trail_sl > position.stop_loss:
                     position.stop_loss = round(trail_sl, 2)
-                    logger.info(f"Tight trail: ${dollar_pnl:.2f} profit → SL={position.stop_loss}")
+                    logger.info(f"Legacy tight trail: ${dollar_pnl:.2f} profit → SL={position.stop_loss}")
             else:
                 trail_sl = current_price * (1 + trail_pct)
                 if trail_sl < position.stop_loss:
                     position.stop_loss = round(trail_sl, 2)
-                    logger.info(f"Tight trail: ${dollar_pnl:.2f} profit → SL={position.stop_loss}")
-
-        return False, ""
+                    logger.info(f"Legacy tight trail: ${dollar_pnl:.2f} profit → SL={position.stop_loss}")
 
     def record_trade(self, trade: Trade):
         """Record a completed trade for risk tracking."""
