@@ -56,7 +56,7 @@ class MEXCClient:
         if signed:
             param_str = ""
             if params and method == "POST":
-                param_str = json.dumps(params)
+                param_str = json.dumps(params, separators=(",", ":"))
             # For GET requests, params in query string are NOT included in signature
             sign_str = f"{self.config.api_key}{timestamp}{param_str}"
             signature = self._sign(sign_str)
@@ -69,7 +69,9 @@ class MEXCClient:
             if method == "GET":
                 resp = await self.client.get(url, params=params, headers=headers)
             else:
-                resp = await self.client.post(url, json=params, headers=headers)
+                # Send raw JSON string to ensure signature matches body exactly
+                body = json.dumps(params, separators=(",", ":")) if params else ""
+                resp = await self.client.post(url, content=body, headers=headers)
 
             logger.debug(f"API response status={resp.status_code}")
             data = resp.json()
@@ -120,17 +122,57 @@ class MEXCClient:
 
         candles = []
         if data.get("success") and data.get("data"):
-            for k in data["data"]:
-                candles.append(
-                    Candle(
-                        timestamp=int(k.get("time", 0)),
-                        open=float(k.get("open", 0)),
-                        high=float(k.get("high", 0)),
-                        low=float(k.get("low", 0)),
-                        close=float(k.get("close", 0)),
-                        volume=float(k.get("vol", 0)),
+            raw = data["data"]
+            # Handle different response formats
+            if isinstance(raw, dict) and "time" in raw:
+                # Single dict with arrays: {time: [...], open: [...], ...}
+                times = raw.get("time", [])
+                opens = raw.get("open", [])
+                highs = raw.get("high", [])
+                lows = raw.get("low", [])
+                closes = raw.get("close", [])
+                vols = raw.get("vol", [])
+                for i in range(len(times)):
+                    candles.append(
+                        Candle(
+                            timestamp=int(times[i]),
+                            open=float(opens[i]),
+                            high=float(highs[i]),
+                            low=float(lows[i]),
+                            close=float(closes[i]),
+                            volume=float(vols[i]) if i < len(vols) else 0,
+                        )
                     )
-                )
+            elif isinstance(raw, list):
+                for k in raw:
+                    if isinstance(k, dict):
+                        # List of dicts: [{time: ..., open: ...}, ...]
+                        candles.append(
+                            Candle(
+                                timestamp=int(k.get("time", 0)),
+                                open=float(k.get("open", 0)),
+                                high=float(k.get("high", 0)),
+                                low=float(k.get("low", 0)),
+                                close=float(k.get("close", 0)),
+                                volume=float(k.get("vol", 0)),
+                            )
+                        )
+                    elif isinstance(k, (list, tuple)) and len(k) >= 6:
+                        # List of arrays: [[time, open, close, high, low, vol], ...]
+                        candles.append(
+                            Candle(
+                                timestamp=int(k[0]),
+                                open=float(k[1]),
+                                high=float(k[3]),
+                                low=float(k[4]),
+                                close=float(k[2]),
+                                volume=float(k[5]),
+                            )
+                        )
+            if candles:
+                logger.info(f"Parsed {len(candles)} candles, latest close={candles[-1].close}")
+            else:
+                logger.warning(f"Could not parse kline data format: {type(raw)}, sample={str(raw)[:200]}")
         return candles
 
     async def get_depth(self, symbol: str, limit: int = 20) -> Dict:
