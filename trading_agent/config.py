@@ -29,24 +29,24 @@ class TradingConfig:
     symbol: str = os.getenv("TRADING_SYMBOL", "BTCUSDT")
 
     # Leverage settings (defaults — AI overrides these)
-    leverage: int = int(os.getenv("TRADING_LEVERAGE", "10"))
-    max_leverage: int = 50
+    leverage: int = int(os.getenv("TRADING_LEVERAGE", "25"))
+    max_leverage: int = 75
 
     # Position sizing (defaults — AI overrides)
-    max_position_pct: float = 0.30
+    max_position_pct: float = 0.90  # Almost all-in — multiply or die
     min_order_usdt: float = 1.0
 
     # Risk management (defaults — AI overrides)
-    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "1.0"))
-    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "2.0"))
-    trailing_stop_pct: float = 0.5
-    max_daily_loss_pct: float = 15.0  # Safety net only
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "2.0"))
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "6.0"))
+    trailing_stop_pct: float = 1.0
+    max_daily_loss_pct: float = 80.0  # Almost no daily limit — go hard
     max_open_positions: int = 1
 
     # Timing
     candle_interval: str = "Min1"
     analysis_interval: int = 5  # Every 5 seconds
-    cooldown_after_trade: int = 10  # 10s cooldown
+    cooldown_after_trade: int = 3  # Fast re-entry
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
@@ -63,7 +63,7 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "65"))
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "40"))
 
 
 @dataclass

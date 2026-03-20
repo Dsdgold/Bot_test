@@ -448,9 +448,9 @@ class TradingAgent:
         ai_sl_pct = getattr(signal, '_ai_stop_loss_pct', self.config.trading.stop_loss_pct)
         ai_tp_pct = getattr(signal, '_ai_take_profit_pct', self.config.trading.take_profit_pct)
 
-        # AI has full control — only enforce basic sanity
+        # AI has full sovereignty — minimal guardrails
         ai_leverage = max(1, ai_leverage)
-        ai_position_pct = max(0.01, min(ai_position_pct, 0.50))
+        ai_position_pct = max(0.05, min(ai_position_pct, 0.95))
 
         # Calculate position size using AI-decided percentage
         balance = self.account.balance
@@ -548,27 +548,8 @@ class TradingAgent:
         self.position.unrealized_pnl = raw_pnl * self.position.leverage
         leveraged_pnl_pct = (raw_pnl / self.position.entry_price) * 100 * self.position.leverage
 
-        # Partial close: close 50% at first TP level, let rest ride with trailing
-        if not self.position.partial_closed and leveraged_pnl_pct >= 1.5:
-            half_qty = round(self.position.original_quantity * 0.5, 6)
-            if half_qty > 0:
-                logger.info(
-                    f"PARTIAL CLOSE: Taking 50% profit at {leveraged_pnl_pct:.2f}% "
-                    f"(closing {half_qty} of {self.position.quantity})"
-                )
-                if not self.config.paper_trading:
-                    await self.client.close_position_partial(
-                        self.position.symbol, self.position.side, half_qty
-                    )
-                self.position.quantity = round(self.position.quantity - half_qty, 6)
-                self.position.partial_closed = True
-                # Move SL to break-even after partial close
-                self.position.stop_loss = self.position.entry_price
-                logger.info(f"SL moved to break-even: {self.position.stop_loss:.2f}")
-                if self.config.paper_trading:
-                    # Record partial profit for paper trading
-                    partial_pnl = raw_pnl * self.position.leverage * 0.5
-                    self.paper_balance += partial_pnl
+        # No partial close — ride the FULL position to TP or SL
+        # We're here to multiply, not collect crumbs
 
         # Check technical SL/TP and trailing stop
         should_close, reason = self.risk_manager.should_close_position(

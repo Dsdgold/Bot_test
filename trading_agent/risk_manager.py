@@ -50,19 +50,8 @@ class RiskManager:
                 remaining = self.config.cooldown_after_trade - elapsed
                 return False, f"Cooldown: {remaining:.0f}s remaining"
 
-        # Reduce activity after consecutive losses
-        if self.consecutive_losses >= 3:
-            # Allow trading again after 5 minutes cooldown
-            if self.last_trade_time:
-                elapsed = (datetime.now() - self.last_trade_time).total_seconds()
-                if elapsed < 300:  # 5 minute pause
-                    remaining = 300 - elapsed
-                    return False, f"Loss streak pause: {self.consecutive_losses} losses, {remaining:.0f}s cooldown"
-                else:
-                    # Reset after cooldown
-                    self.consecutive_losses = 0
-                    logger.info("Loss streak cooldown expired, resuming trading")
-
+        # No loss streak pause — get back in immediately, the next trade matters
+        # AI has full sovereignty over trade decisions
         return True, "OK"
 
     def calculate_position_size(
@@ -72,22 +61,11 @@ class RiskManager:
         if balance <= 0 or price <= 0:
             return 0.0
 
-        # Base position: percentage of balance
+        # Base position: percentage of balance — go big
         max_notional = balance * self.config.max_position_pct
 
-        # Adjust by ATR (higher volatility → smaller position)
-        if indicators.atr > 0 and price > 0:
-            atr_pct = indicators.atr / price
-            if atr_pct > 0.02:  # High volatility
-                max_notional *= 0.6
-                logger.info(f"High volatility (ATR: {atr_pct:.4f}), reducing position")
-            elif atr_pct > 0.01:
-                max_notional *= 0.8
-
-        # Reduce after losses
-        if self.consecutive_losses >= 2:
-            max_notional *= 0.5
-            logger.info("Reducing position size after consecutive losses")
+        # No ATR reduction — volatility is OPPORTUNITY, not risk
+        # No consecutive loss reduction — AI decides sizing, not fear
 
         # Calculate quantity (contracts/coins)
         quantity = max_notional / price
@@ -150,8 +128,8 @@ class RiskManager:
         if position.side == Side.SHORT and current_price <= position.take_profit:
             return True, f"Take-profit hit at {current_price:.2f}"
 
-        # Trailing stop-loss (move SL in profit direction)
-        if leveraged_pnl_pct > 1.0:
+        # Trailing stop-loss (move SL in profit direction) — activate later to let winners RUN
+        if leveraged_pnl_pct > 3.0:
             trail_pct = self.config.trailing_stop_pct / 100
             if position.side == Side.LONG:
                 new_sl = current_price * (1 - trail_pct)
@@ -165,7 +143,7 @@ class RiskManager:
                     logger.info(f"Trailing SL moved to {position.stop_loss}")
 
         # Trailing take-profit (move TP further when in strong profit)
-        if leveraged_pnl_pct > 2.0:
+        if leveraged_pnl_pct > 5.0:
             # When we're 2%+ in profit (leveraged), extend TP to ride the trend
             tp_trail_pct = self.config.trailing_stop_pct / 100 * 2  # Wider than SL
             if position.side == Side.LONG:
