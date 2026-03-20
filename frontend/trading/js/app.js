@@ -65,12 +65,12 @@ async function saveSettings() {
 
     // API keys - only send if user entered them
     const anthropicKey = document.getElementById('cfg-anthropic-key').value.trim();
-    const mexcKey = document.getElementById('cfg-mexc-key').value.trim();
-    const mexcSecret = document.getElementById('cfg-mexc-secret').value.trim();
+    const bybitKey = document.getElementById('cfg-bybit-key').value.trim();
+    const bybitSecret = document.getElementById('cfg-bybit-secret').value.trim();
 
     if (anthropicKey) config.anthropic_api_key = anthropicKey;
-    if (mexcKey) config.mexc_api_key = mexcKey;
-    if (mexcSecret) config.mexc_api_secret = mexcSecret;
+    if (bybitKey) config.bybit_api_key = bybitKey;
+    if (bybitSecret) config.bybit_api_secret = bybitSecret;
 
     try {
         const resp = await fetch(`${API}/api/config`, {
@@ -82,8 +82,8 @@ async function saveSettings() {
 
         // Clear password fields after saving
         document.getElementById('cfg-anthropic-key').value = '';
-        document.getElementById('cfg-mexc-key').value = '';
-        document.getElementById('cfg-mexc-secret').value = '';
+        document.getElementById('cfg-bybit-key').value = '';
+        document.getElementById('cfg-bybit-secret').value = '';
 
         // Show confirmation
         if (result.config) {

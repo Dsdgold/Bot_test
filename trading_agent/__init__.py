@@ -1,1 +1,1 @@
-# AI Trading Agent for MEXC Futures
+# AI Trading Agent for Bybit Futures

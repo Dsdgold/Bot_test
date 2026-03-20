@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     logger.info("Trading Dashboard stopped.")
 
 
-app = FastAPI(title="AI Trading Agent - MEXC", lifespan=lifespan)
+app = FastAPI(title="AI Trading Agent - Bybit", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -138,10 +138,10 @@ async def update_config(data: dict):
     # API keys (set at runtime through dashboard)
     if "anthropic_api_key" in data and data["anthropic_api_key"]:
         config.ai.api_key = data["anthropic_api_key"]
-    if "mexc_api_key" in data and data["mexc_api_key"]:
-        config.mexc.api_key = data["mexc_api_key"]
-    if "mexc_api_secret" in data and data["mexc_api_secret"]:
-        config.mexc.api_secret = data["mexc_api_secret"]
+    if "bybit_api_key" in data and data["bybit_api_key"]:
+        config.bybit.api_key = data["bybit_api_key"]
+    if "bybit_api_secret" in data and data["bybit_api_secret"]:
+        config.bybit.api_secret = data["bybit_api_secret"]
 
     return {"status": "updated", "config": {
         "symbol": trading.symbol,
@@ -151,7 +151,7 @@ async def update_config(data: dict):
         "min_confidence": trading.min_confidence,
         "paper_trading": config.paper_trading,
         "ai_enabled": bool(config.ai.api_key),
-        "mexc_configured": bool(config.mexc.api_key),
+        "bybit_configured": bool(config.bybit.api_key),
     }}
 
 

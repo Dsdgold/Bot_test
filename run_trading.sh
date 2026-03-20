@@ -1,10 +1,10 @@
 #!/bin/bash
-# AI Trading Agent - MEXC Futures Scalper
+# AI Trading Agent - Bybit Futures Scalper
 
 set -e
 
 echo "════════════════════════════════════════════════════════"
-echo "  AI TRADING AGENT - MEXC Futures Scalper"
+echo "  AI TRADING AGENT - Bybit Futures Scalper"
 echo "════════════════════════════════════════════════════════"
 echo ""
 
@@ -16,7 +16,7 @@ fi
 
 # Default to paper trading
 export PAPER_TRADING=${PAPER_TRADING:-true}
-export TRADING_SYMBOL=${TRADING_SYMBOL:-BTC_USDT}
+export TRADING_SYMBOL=${TRADING_SYMBOL:-BTCUSDT}
 export TRADING_LEVERAGE=${TRADING_LEVERAGE:-20}
 export DASHBOARD_PORT=${DASHBOARD_PORT:-8001}
 

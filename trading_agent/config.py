@@ -7,21 +7,23 @@ from typing import Optional
 
 
 @dataclass
-class MEXCConfig:
-    """MEXC API configuration."""
-    api_key: str = os.getenv("MEXC_API_KEY", "")
-    api_secret: str = os.getenv("MEXC_API_SECRET", "")
-    base_url: str = "https://contract.mexc.com"
-    spot_url: str = "https://api.mexc.com"
-    ws_url: str = "wss://contract.mexc.com/edge"
-    testnet: bool = os.getenv("MEXC_TESTNET", "false").lower() == "true"
+class BybitConfig:
+    """Bybit API configuration."""
+    api_key: str = os.getenv("BYBIT_API_KEY", "")
+    api_secret: str = os.getenv("BYBIT_API_SECRET", "")
+    base_url: str = os.getenv(
+        "BYBIT_BASE_URL",
+        "https://api-testnet.bybit.com" if os.getenv("BYBIT_TESTNET", "false").lower() == "true"
+        else "https://api.bybit.com"
+    )
+    testnet: bool = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 
 
 @dataclass
 class TradingConfig:
     """Trading parameters."""
-    # Symbol to trade (futures)
-    symbol: str = os.getenv("TRADING_SYMBOL", "BTC_USDT")
+    # Symbol to trade (USDT perpetual futures)
+    symbol: str = os.getenv("TRADING_SYMBOL", "BTCUSDT")
 
     # Leverage settings
     leverage: int = int(os.getenv("TRADING_LEVERAGE", "20"))
@@ -75,7 +77,7 @@ class AIConfig:
 @dataclass
 class AgentConfig:
     """Full agent configuration."""
-    mexc: MEXCConfig = field(default_factory=MEXCConfig)
+    bybit: BybitConfig = field(default_factory=BybitConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
     ai: AIConfig = field(default_factory=AIConfig)
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from .config import AgentConfig
-from .mexc_client import MEXCClient
+from .bybit_client import BybitClient
 from .strategy import ScalpingStrategy
 from .risk_manager import RiskManager
 from .ai_brain import ClaudeAIBrain
@@ -22,7 +22,7 @@ logger = logging.getLogger("agent")
 
 class TradingAgent:
     """
-    AI Trading Agent for MEXC Futures.
+    AI Trading Agent for Bybit Futures.
 
     Flow:
     1. Fetch market data (candles, ticker)
@@ -37,7 +37,7 @@ class TradingAgent:
 
     def __init__(self, config: AgentConfig):
         self.config = config
-        self.client = MEXCClient(config.mexc)
+        self.client = BybitClient(config.bybit)
         self.strategy = ScalpingStrategy(config.trading)
         self.risk_manager = RiskManager(config.trading)
         self.ai_brain = ClaudeAIBrain(config.ai.api_key, config.ai.model)
@@ -72,7 +72,7 @@ class TradingAgent:
     async def start(self):
         """Start the trading agent."""
         logger.info("=" * 60)
-        logger.info("  AI TRADING AGENT - MEXC FUTURES SCALPER")
+        logger.info("  AI TRADING AGENT - BYBIT FUTURES SCALPER")
         logger.info(f"  Symbol: {self.config.trading.symbol}")
         logger.info(f"  Leverage: {self.config.trading.leverage}x")
         logger.info(f"  Mode: {'PAPER' if self.config.paper_trading else 'LIVE'}")
