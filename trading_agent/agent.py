@@ -441,9 +441,9 @@ class TradingAgent:
         ai_sl_pct = getattr(signal, '_ai_stop_loss_pct', self.config.trading.stop_loss_pct)
         ai_tp_pct = getattr(signal, '_ai_take_profit_pct', self.config.trading.take_profit_pct)
 
-        # AI has full sovereignty — minimal guardrails
-        ai_leverage = max(1, ai_leverage)
-        ai_position_pct = max(0.05, min(ai_position_pct, 0.95))
+        # Cap leverage to max_leverage for safety
+        ai_leverage = max(1, min(ai_leverage, self.config.trading.max_leverage))
+        ai_position_pct = max(0.05, min(ai_position_pct, self.config.trading.max_position_pct))
 
         # Calculate position size using AI-decided percentage
         balance = self.account.balance
@@ -459,6 +459,17 @@ class TradingAgent:
             return
 
         quantity = round(quantity, 6)
+
+        # Validate against instrument minimum quantity (0.001 for BTCUSDT)
+        min_qty = 0.001  # Will be fetched from exchange in open_position
+        if quantity < min_qty:
+            # Check if we can afford min_qty with current leverage
+            min_notional = min_qty * price / ai_leverage
+            if min_notional > balance * 0.95:
+                logger.info(f"Cannot afford min qty {min_qty} BTC (needs ${min_notional:.2f}, have ${balance:.2f})")
+                return
+            quantity = min_qty
+            logger.info(f"Quantity rounded up to min_qty: {min_qty}")
 
         # Calculate SL/TP using AI-decided percentages
         sl_distance = price * (ai_sl_pct / 100)
@@ -553,11 +564,15 @@ class TradingAgent:
             await self._close_position(reason)
             return
 
-        # Ask AI if we should close (every N ticks)
+        # Ask AI if we should close (every N ticks, but respect minimum hold time)
+        hold_time = (datetime.now() - self.position.open_time).total_seconds()
+        min_hold = getattr(self.config.trading, 'min_hold_time', 120)
+
         if (
             self.ai_enabled
             and self.config.ai.ai_close_decisions
             and self.tick_count % self.config.ai.analysis_every_n_ticks == 0
+            and hold_time >= min_hold  # Don't ask AI to close before min hold time
         ):
             ai_close, ai_reason = await self.ai_brain.should_close_position(
                 self.candles, indicators, self.position, self.account.balance,

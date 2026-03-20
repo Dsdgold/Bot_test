@@ -50,8 +50,15 @@ class RiskManager:
                 remaining = self.config.cooldown_after_trade - elapsed
                 return False, f"Cooldown: {remaining:.0f}s remaining"
 
-        # No loss streak pause — get back in immediately, the next trade matters
-        # AI has full sovereignty over trade decisions
+        # Loss streak protection — after 3 consecutive losses, add extra cooldown
+        if self.consecutive_losses >= 3:
+            extra_cooldown = 180  # 3 minutes extra after 3 losses in a row
+            if self.last_trade_time:
+                elapsed = (datetime.now() - self.last_trade_time).total_seconds()
+                if elapsed < extra_cooldown:
+                    remaining = extra_cooldown - elapsed
+                    return False, f"Loss streak cooldown ({self.consecutive_losses} losses): {remaining:.0f}s remaining"
+
         return True, "OK"
 
     def calculate_position_size(
@@ -116,13 +123,17 @@ class RiskManager:
 
         leveraged_pnl_pct = pnl_pct * position.leverage
 
-        # Stop loss hit
+        # How long has this position been open?
+        hold_time_seconds = (datetime.now() - position.open_time).total_seconds()
+        min_hold = getattr(self.config, 'min_hold_time', 120)
+
+        # ALWAYS respect stop loss — no minimum hold time for SL
         if position.side == Side.LONG and current_price <= position.stop_loss:
             return True, f"Stop-loss hit at {current_price:.2f}"
         if position.side == Side.SHORT and current_price >= position.stop_loss:
             return True, f"Stop-loss hit at {current_price:.2f}"
 
-        # Take profit hit
+        # Take profit hit — always respect
         if position.side == Side.LONG and current_price >= position.take_profit:
             return True, f"Take-profit hit at {current_price:.2f}"
         if position.side == Side.SHORT and current_price <= position.take_profit:
@@ -131,27 +142,27 @@ class RiskManager:
         # Calculate actual dollar PnL
         dollar_pnl = pnl_pct / 100 * position.entry_price * position.quantity * position.leverage
 
-        # FORCED TAKE PROFIT — on a small account, $3+ is a WIN. TAKE IT.
-        # AI keeps holding and giving back profits. This overrides AI.
-        if dollar_pnl >= 3.0:
-            return True, f"Dollar TP hit: ${dollar_pnl:.2f} profit — BANKED!"
+        # Don't apply trailing/breakeven logic until minimum hold time passed
+        # This prevents closing trades too early before they can develop
+        if hold_time_seconds < min_hold:
+            return False, ""
 
-        # At $1.50+ profit, move SL to break-even minimum
-        if dollar_pnl >= 1.50:
+        # After min hold time: move SL to break-even at $3+ profit
+        if dollar_pnl >= 3.0:
             if position.side == Side.LONG:
-                be_sl = position.entry_price + 5  # Tiny profit guaranteed
+                be_sl = position.entry_price + 10  # Lock in small profit
                 if be_sl > position.stop_loss:
                     position.stop_loss = round(be_sl, 2)
-                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit)")
+                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit, held {hold_time_seconds:.0f}s)")
             else:
-                be_sl = position.entry_price - 5
+                be_sl = position.entry_price - 10
                 if be_sl < position.stop_loss:
                     position.stop_loss = round(be_sl, 2)
-                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit)")
+                    logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit, held {hold_time_seconds:.0f}s)")
 
-        # At $0.50+ start tight trailing
-        if dollar_pnl >= 0.50:
-            trail_pct = 0.002  # 0.2% trail
+        # Trailing stop at $5+ profit — loose trail to let winners run
+        if dollar_pnl >= 5.0:
+            trail_pct = 0.004  # 0.4% trail — wide enough to avoid noise
             if position.side == Side.LONG:
                 new_sl = current_price * (1 - trail_pct)
                 if new_sl > position.stop_loss:
@@ -163,13 +174,9 @@ class RiskManager:
                     position.stop_loss = round(new_sl, 2)
                     logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
 
-        # Trend reversal detection
-        if position.side == Side.LONG:
-            if indicators.ema_fast < indicators.ema_slow and indicators.rsi > 65:
-                return True, "Trend reversal (EMA cross + high RSI)"
-        else:
-            if indicators.ema_fast > indicators.ema_slow and indicators.rsi < 35:
-                return True, "Trend reversal (EMA cross + low RSI)"
+        # Force close only at $10+ to bank big wins (after hold time)
+        if dollar_pnl >= 10.0:
+            return True, f"Big profit banked: ${dollar_pnl:.2f}"
 
         return False, ""
 

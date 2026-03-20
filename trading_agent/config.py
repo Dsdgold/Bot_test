@@ -29,24 +29,24 @@ class TradingConfig:
     symbol: str = os.getenv("TRADING_SYMBOL", "BTCUSDT")
 
     # Leverage settings (defaults — AI overrides these)
-    leverage: int = int(os.getenv("TRADING_LEVERAGE", "25"))
-    max_leverage: int = 75
+    leverage: int = int(os.getenv("TRADING_LEVERAGE", "15"))
+    max_leverage: int = 25
 
     # Position sizing (defaults — AI overrides)
-    max_position_pct: float = 0.90  # Almost all-in — multiply or die
+    max_position_pct: float = 0.70  # Conservative sizing to survive losses
     min_order_usdt: float = 1.0
 
     # Risk management (defaults — AI overrides)
-    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "2.0"))
-    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "6.0"))
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "1.2"))
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "3.0"))
     trailing_stop_pct: float = 1.0
-    max_daily_loss_pct: float = 80.0  # Almost no daily limit — go hard
+    max_daily_loss_pct: float = 25.0  # Stop trading after 25% daily loss
     max_open_positions: int = 1
 
     # Timing
     candle_interval: str = "Min1"
-    analysis_interval: int = 5  # Every 5 seconds
-    cooldown_after_trade: int = 3  # Fast re-entry
+    analysis_interval: int = 30  # Every 30 seconds — give market time to move
+    cooldown_after_trade: int = 60  # Wait 60s between trades to avoid overtrading
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
@@ -63,7 +63,10 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "40"))
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "65"))
+
+    # Minimum hold time in seconds — prevent closing trades too early
+    min_hold_time: int = int(os.getenv("MIN_HOLD_TIME", "120"))
 
 
 @dataclass
@@ -71,8 +74,8 @@ class AIConfig:
     """Claude AI configuration."""
     api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     model: str = os.getenv("AI_MODEL", "claude-haiku-4-5-20251001")
-    # How often to ask Claude (every N ticks)
-    analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "1"))
+    # How often to ask Claude (every N ticks) — higher = less frequent close checks
+    analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "4"))
     # Use AI for position close decisions too
     ai_close_decisions: bool = os.getenv("AI_CLOSE_DECISIONS", "true").lower() == "true"
 
