@@ -264,16 +264,21 @@ class MEXCClient:
     # ── Trading ──────────────────────────────────────────────────
 
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
-        """Set leverage for a symbol."""
-        # Try with openType (1=isolated, 2=cross)
-        params = {"symbol": symbol, "leverage": leverage, "openType": 2}
-        data = await self._request(
-            "POST", "/api/v1/private/position/change_leverage", params, signed=True
-        )
-        if data.get("success"):
-            logger.info(f"Leverage set to {leverage}x for {symbol}")
-            return True
-        logger.warning(f"Set leverage response: {data}")
+        """Set leverage for a symbol. Non-critical - leverage is also set per order."""
+        # Try multiple parameter formats
+        for params in [
+            {"symbol": symbol, "leverage": leverage, "openType": 2, "positionType": 1},
+            {"symbol": symbol, "leverage": leverage, "openType": 2},
+            {"symbol": symbol, "leverage": leverage},
+        ]:
+            data = await self._request(
+                "POST", "/api/v1/private/position/change_leverage", params, signed=True
+            )
+            if data.get("success"):
+                logger.info(f"Leverage set to {leverage}x for {symbol}")
+                return True
+        # Not critical - leverage is included in each order
+        logger.info(f"Pre-setting leverage skipped (will use per-order leverage: {leverage}x)")
         return False
 
     async def open_position(
