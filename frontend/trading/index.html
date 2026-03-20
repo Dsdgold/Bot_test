@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading Agent - MEXC Futures</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────── -->
+<header class="header">
+    <div class="header-left">
+        <div class="logo">AI TRADING AGENT</div>
+        <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
+        <span id="symbol-display" style="font-family: var(--mono); font-size: 14px; font-weight: 600;">BTC_USDT</span>
+    </div>
+    <div class="header-right">
+        <button class="btn btn-settings" onclick="openSettings()">Settings</button>
+        <button id="btn-start" class="btn btn-start" onclick="startAgent()">START</button>
+        <button id="btn-stop" class="btn btn-stop" onclick="stopAgent()" style="display:none;">STOP</button>
+    </div>
+</header>
+
+<!-- ── Status Bar ──────────────────────────────────────── -->
+<div class="status-bar">
+    <div class="status-item">
+        <span id="status-dot" class="status-dot stopped"></span>
+        <span id="status-text">Stopped</span>
+    </div>
+    <div class="status-item">
+        <span class="status-label">Price:</span>
+        <span id="price-display" class="status-value">--</span>
+    </div>
+    <div class="status-item">
+        <span class="status-label">24h:</span>
+        <span id="change-display" class="status-value">--</span>
+    </div>
+    <div class="status-item">
+        <span class="status-label">Volume:</span>
+        <span id="volume-display" class="status-value">--</span>
+    </div>
+    <div class="status-item">
+        <span class="status-label">Leverage:</span>
+        <span id="leverage-display" class="status-value">20x</span>
+    </div>
+</div>
+
+<!-- ── Main Content ────────────────────────────────────── -->
+<div class="main">
+
+    <!-- Stats Row -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">Balance</div>
+            <div id="stat-balance" class="stat-value">$10,000.00</div>
+            <div id="stat-pnl-daily" class="stat-sub neutral">Daily: $0.00</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Unrealized PnL</div>
+            <div id="stat-unrealized" class="stat-value neutral">$0.00</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Trades</div>
+            <div id="stat-trades" class="stat-value">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Win Rate</div>
+            <div id="stat-winrate" class="stat-value">0%</div>
+            <div id="stat-wl" class="stat-sub neutral">W: 0 / L: 0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Signal</div>
+            <div id="stat-signal" class="stat-value neutral">NEUTRAL</div>
+            <div id="stat-confidence" class="stat-sub">0%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">RSI</div>
+            <div id="stat-rsi" class="stat-value">50.0</div>
+        </div>
+    </div>
+
+    <!-- Position Card (shown when position is open) -->
+    <div id="position-card" class="position-card">
+        <div class="position-header">
+            <span class="panel-title" style="border: none; padding: 0; margin: 0;">Open Position</span>
+            <span id="pos-side" class="position-side long">LONG</span>
+        </div>
+        <div class="position-details">
+            <div class="position-field">
+                <div class="field-label">Entry Price</div>
+                <div id="pos-entry" class="field-value">--</div>
+            </div>
+            <div class="position-field">
+                <div class="field-label">Stop Loss</div>
+                <div id="pos-sl" class="field-value negative">--</div>
+            </div>
+            <div class="position-field">
+                <div class="field-label">Take Profit</div>
+                <div id="pos-tp" class="field-value positive">--</div>
+            </div>
+            <div class="position-field">
+                <div class="field-label">Size</div>
+                <div id="pos-size" class="field-value">--</div>
+            </div>
+            <div class="position-field">
+                <div class="field-label">Unrealized PnL</div>
+                <div id="pos-pnl" class="field-value">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="chart-area">
+        <div class="chart-header">
+            <span class="chart-title">Price Chart (1m candles)</span>
+        </div>
+        <canvas id="chart-canvas"></canvas>
+    </div>
+
+    <!-- Signal Panel -->
+    <div class="signal-panel">
+        <div class="panel-title">Trading Signal</div>
+        <div id="signal-box" class="signal-direction neutral">
+            <div id="signal-dir-label" class="signal-label">NEUTRAL</div>
+            <div id="signal-conf-text" style="font-size: 12px; color: var(--text-secondary);">Confidence: 0%</div>
+            <div class="confidence-bar">
+                <div id="confidence-bar-fill" class="confidence-fill" style="width: 0%; background: var(--text-muted);"></div>
+            </div>
+        </div>
+        <div class="panel-title" style="margin-top: 14px;">Analysis Reasons</div>
+        <ul id="reasons-list" class="reasons-list">
+            <li>Waiting for data...</li>
+        </ul>
+    </div>
+
+    <!-- Indicators Panel -->
+    <div class="indicators-panel">
+        <div class="panel-title">Indicators</div>
+        <div id="indicators-list">
+            <div class="indicator-row"><span class="indicator-name">RSI (14)</span><span id="ind-rsi" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">EMA 9</span><span id="ind-ema-fast" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">EMA 21</span><span id="ind-ema-slow" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">EMA 50</span><span id="ind-ema-trend" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">MACD</span><span id="ind-macd" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">MACD Signal</span><span id="ind-macd-sig" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">MACD Hist</span><span id="ind-macd-hist" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">BB Upper</span><span id="ind-bb-up" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">BB Middle</span><span id="ind-bb-mid" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">BB Lower</span><span id="ind-bb-low" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">VWAP</span><span id="ind-vwap" class="indicator-value">--</span></div>
+            <div class="indicator-row"><span class="indicator-name">ATR</span><span id="ind-atr" class="indicator-value">--</span></div>
+        </div>
+    </div>
+
+    <!-- Trades Table -->
+    <div class="trades-section">
+        <div class="panel-title">Trade History</div>
+        <table class="trades-table">
+            <thead>
+                <tr>
+                    <th>Side</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>PnL</th>
+                    <th>PnL %</th>
+                    <th>Reason</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody id="trades-body">
+                <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 20px;">No trades yet</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Settings Modal ──────────────────────────────────── -->
+<div id="settings-modal" class="modal-overlay">
+    <div class="modal">
+        <h2>Agent Settings</h2>
+        <div class="form-group">
+            <label>Symbol</label>
+            <select id="cfg-symbol">
+                <option value="BTC_USDT">BTC/USDT</option>
+                <option value="ETH_USDT">ETH/USDT</option>
+                <option value="SOL_USDT">SOL/USDT</option>
+                <option value="XRP_USDT">XRP/USDT</option>
+                <option value="DOGE_USDT">DOGE/USDT</option>
+                <option value="AVAX_USDT">AVAX/USDT</option>
+                <option value="ADA_USDT">ADA/USDT</option>
+                <option value="MATIC_USDT">MATIC/USDT</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Leverage</label>
+            <input type="number" id="cfg-leverage" min="1" max="50" value="20">
+        </div>
+        <div class="form-group">
+            <label>Stop Loss %</label>
+            <input type="number" id="cfg-sl" step="0.1" min="0.1" max="10" value="1.5">
+        </div>
+        <div class="form-group">
+            <label>Take Profit %</label>
+            <input type="number" id="cfg-tp" step="0.1" min="0.1" max="20" value="3.0">
+        </div>
+        <div class="form-group">
+            <label>Min Confidence %</label>
+            <input type="number" id="cfg-confidence" step="1" min="30" max="95" value="65">
+        </div>
+        <div class="form-group">
+            <label>Mode</label>
+            <select id="cfg-mode">
+                <option value="true">Paper Trading</option>
+                <option value="false">Live Trading</option>
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-start" onclick="saveSettings()">Save</button>
+            <button class="btn btn-settings" onclick="closeSettings()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

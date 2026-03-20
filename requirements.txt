@@ -8,3 +8,6 @@ fake-useragent==2.0.3
 python-multipart==0.0.20
 aiofiles==24.1.0
 pydantic==2.10.4
+
+# Trading Agent
+websockets>=12.0
