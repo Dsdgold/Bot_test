@@ -256,17 +256,33 @@ class BybitClient:
         """Get USDT balance from unified account."""
         info = await self.get_account_info()
         accounts = info.get("list", [])
+
+        # Try totalAvailableBalance at account level first
         for account in accounts:
+            total = account.get("totalAvailableBalance", "")
+            if total and total != "":
+                try:
+                    balance = float(total)
+                    if balance > 0:
+                        logger.debug(f"Found total available balance: {balance}")
+                        return balance
+                except (ValueError, TypeError):
+                    pass
+
             coins = account.get("coin", [])
             for coin in coins:
                 if coin.get("coin") == "USDT":
-                    # availableToWithdraw is the free balance
-                    balance = float(coin.get("availableToWithdraw", 0))
-                    if balance == 0:
-                        # Fallback to walletBalance
-                        balance = float(coin.get("walletBalance", 0))
-                    logger.debug(f"Found USDT balance: {balance}")
-                    return balance
+                    # Try multiple balance fields, skip empty strings
+                    for field in ["availableToWithdraw", "walletBalance", "equity"]:
+                        val = coin.get(field, "")
+                        if val and val != "":
+                            try:
+                                balance = float(val)
+                                if balance > 0:
+                                    logger.debug(f"Found USDT balance ({field}): {balance}")
+                                    return balance
+                            except (ValueError, TypeError):
+                                continue
         logger.warning("USDT not found in wallet")
         return 0.0
 
