@@ -226,8 +226,12 @@ class TradingAgent:
                 self.account.unrealized_pnl = pnl * self.position.leverage
         else:
             balance = await self.client.get_balance()
-            self.account.balance = balance
-            self.account.available = balance
+            if balance > 0:
+                self.account.balance = balance
+                self.account.available = balance
+                logger.info(f"Live balance updated: ${balance:.2f}")
+            elif self.account.balance == 0:
+                logger.warning("Balance is 0 - check API keys and futures account")
 
         self.account.daily_pnl = self.risk_manager.daily_pnl
         self.account.total_trades = len(self.trades)

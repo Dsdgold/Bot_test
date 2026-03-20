@@ -55,8 +55,9 @@ class MEXCClient:
 
         if signed:
             param_str = ""
-            if params:
-                param_str = json.dumps(params) if method == "POST" else urlencode(params)
+            if params and method == "POST":
+                param_str = json.dumps(params)
+            # For GET requests, params in query string are NOT included in signature
             sign_str = f"{self.config.api_key}{timestamp}{param_str}"
             signature = self._sign(sign_str)
             headers = self._headers(timestamp, signature)
@@ -64,17 +65,19 @@ class MEXCClient:
             headers = {"Content-Type": "application/json"}
 
         try:
+            logger.debug(f"API {method} {path} params={params} signed={signed}")
             if method == "GET":
                 resp = await self.client.get(url, params=params, headers=headers)
             else:
                 resp = await self.client.post(url, json=params, headers=headers)
 
+            logger.debug(f"API response status={resp.status_code}")
             data = resp.json()
-            if data.get("success") is False and data.get("code") != 0:
-                logger.error(f"MEXC API error: {data}")
+            if data.get("success") is False:
+                logger.error(f"MEXC API error on {path}: code={data.get('code')} msg={data.get('message', data)}")
             return data
         except Exception as e:
-            logger.error(f"Request failed: {e}")
+            logger.error(f"Request failed {method} {path}: {e}")
             return {"success": False, "message": str(e)}
 
     # ── Market Data ──────────────────────────────────────────────
@@ -135,10 +138,15 @@ class MEXCClient:
 
     # ── Account ──────────────────────────────────────────────────
 
-    async def get_account_info(self) -> Dict:
+    async def get_account_info(self) -> Any:
         """Get futures account information."""
         data = await self._request("GET", "/api/v1/private/account/assets", signed=True)
-        return data.get("data", {})
+        if not data.get("success"):
+            logger.error(f"Failed to get account info: {data}")
+            return []
+        result = data.get("data", [])
+        logger.info(f"Account info response: {result}")
+        return result
 
     async def get_balance(self) -> float:
         """Get USDT balance."""
@@ -146,7 +154,28 @@ class MEXCClient:
         if isinstance(info, list):
             for asset in info:
                 if asset.get("currency") == "USDT":
-                    return float(asset.get("availableBalance", 0))
+                    balance = float(asset.get("availableBalance", 0))
+                    logger.info(f"Found USDT balance: {balance}")
+                    return balance
+            logger.warning(f"USDT not found in assets list: {info}")
+        elif isinstance(info, dict):
+            # Handle case where data is a single object
+            if info.get("currency") == "USDT":
+                balance = float(info.get("availableBalance", 0))
+                logger.info(f"Found USDT balance (dict): {balance}")
+                return balance
+            # Maybe it's a nested structure with equity/availableBalance at top level
+            if "availableBalance" in info:
+                balance = float(info.get("availableBalance", 0))
+                logger.info(f"Found balance from top-level: {balance}")
+                return balance
+            if "equity" in info:
+                balance = float(info.get("equity", 0))
+                logger.info(f"Found equity balance: {balance}")
+                return balance
+            logger.warning(f"Unexpected account info structure: {info}")
+        else:
+            logger.warning(f"Unexpected account info type: {type(info)} = {info}")
         return 0.0
 
     # ── Trading ──────────────────────────────────────────────────
@@ -231,7 +260,8 @@ class MEXCClient:
         """Get open positions for symbol."""
         data = await self._request(
             "GET",
-            f"/api/v1/private/position/open_positions?symbol={symbol}",
+            "/api/v1/private/position/open_positions",
+            params={"symbol": symbol},
             signed=True,
         )
         if data.get("success") and data.get("data"):
