@@ -277,10 +277,11 @@ MARKET CONTEXT:
 - Book Imbalance: {market_context.book_imbalance:+.1f}% ({'buyers dominate' if market_context.book_imbalance > 10 else 'sellers dominate' if market_context.book_imbalance < -10 else 'balanced'})
 - Bid Wall: {market_context.bid_wall_price:.2f} ({market_context.bid_wall_size:.0f}) | Ask Wall: {market_context.ask_wall_price:.2f} ({market_context.ask_wall_size:.0f})
 
-HIGHER TIMEFRAME TRENDS (CRITICAL - do NOT trade against these):
+HIGHER TIMEFRAME TRENDS (context only — YOU decide if they matter or not):
 - 5min:  {market_context.trend_5m} (RSI {market_context.rsi_5m:.0f})
 - 15min: {market_context.trend_15m} (RSI {market_context.rsi_15m:.0f})
 - 1hour: {market_context.trend_1h} (RSI {market_context.rsi_1h:.0f})
+NOTE: Short-term momentum can override higher TF. Reversals START on lower timeframes. Trust your read.
 
 Session: {market_context.trading_session} | Fear&Greed: {market_context.fear_greed_index} ({market_context.fear_greed_label})"""
 
