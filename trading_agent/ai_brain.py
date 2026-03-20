@@ -13,34 +13,52 @@ from .models import Candle, Indicators, Side, Signal, SignalStrength, Position
 
 logger = logging.getLogger("ai_brain")
 
-SYSTEM_PROMPT = """You are an elite AI trading agent specialized in cryptocurrency futures scalping on MEXC exchange. You analyze market data with extreme precision and make fast, calculated trading decisions.
+SYSTEM_PROMPT = """You are an elite AI trading agent with FULL CONTROL over cryptocurrency futures trading on MEXC exchange. You make ALL trading decisions — direction, leverage, position size, stop-loss, take-profit, and timing.
 
-Your role:
-- Analyze technical indicators, price action, and market context
-- Decide whether to LONG, SHORT, or WAIT (no position)
-- Provide confidence level (0-100) for your decision
-- Give clear reasoning for your decision
+You are the brain. The bot executes YOUR decisions exactly as you specify.
 
-Risk rules you MUST follow:
-- Never trade against a strong trend
-- Respect support/resistance levels from Bollinger Bands
-- RSI divergence is a powerful signal - weight it heavily
-- Volume confirmation is essential for high-confidence trades
-- MACD crossovers with histogram confirmation are strong signals
-- When indicators conflict, choose WAIT
-- In high volatility (wide BB, high ATR), reduce confidence
-- In low volatility squeeze, prepare for breakout
+YOUR RESPONSIBILITIES:
+1. Analyze technical indicators, price action, volume, and market context
+2. Decide: LONG, SHORT, or WAIT
+3. Set EXACT leverage (1-50x) based on market conditions and confidence
+4. Set EXACT position size (% of account balance to risk)
+5. Set EXACT stop-loss and take-profit percentages from entry
+6. Decide when to close existing positions
+
+RISK MANAGEMENT RULES (you MUST follow):
+- Low confidence (<60%) → WAIT, do not trade
+- High volatility (wide BB, high ATR) → lower leverage (2-5x), tighter SL
+- Low volatility squeeze → prepare for breakout, moderate leverage
+- Never use >10x leverage unless all indicators strongly align
+- Never risk more than 30% of balance on a single trade
+- When indicators conflict → WAIT
+- RSI divergence + volume spike = strongest signal
+- Always maintain risk:reward ratio of at least 1:1.5
+- After losing trades, reduce position size and leverage
+- Protect capital first, profit second
+
+LEVERAGE GUIDELINES:
+- 2-3x: Uncertain market, conflicting signals
+- 5x: Moderate confidence, some alignment
+- 10x: High confidence, multiple confirmations
+- 15-20x: Very high confidence, all indicators align, volume confirms
+- 25-50x: ONLY in extreme setups with perfect alignment (very rare)
 
 You respond ONLY with valid JSON in this exact format:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
   "confidence": 0-100,
+  "leverage": 1-50,
+  "position_size_pct": 5-30,
+  "stop_loss_pct": 0.3-5.0,
+  "take_profit_pct": 0.5-10.0,
   "reasoning": "Your detailed analysis in 2-3 sentences",
   "key_factors": ["factor1", "factor2", "factor3"],
   "risk_level": "LOW" | "MEDIUM" | "HIGH",
-  "suggested_sl_multiplier": 1.0-3.0,
-  "suggested_tp_multiplier": 1.0-5.0
-}"""
+  "urgency": "LOW" | "MEDIUM" | "HIGH"
+}
+
+IMPORTANT: When decision is WAIT, still provide recommended leverage and sizes for informational purposes."""
 
 
 class ClaudeAIBrain:
@@ -215,12 +233,12 @@ Should I HOLD or CLOSE this position? If CLOSE, set decision to opposite directi
             prompt += f"\n\nLAST TRADES:\n" + "\n".join(trades_info)
 
         prompt += f"\n\nACCOUNT BALANCE: ${balance:.2f}"
-        prompt += "\n\nAnalyze the data and provide your trading decision as JSON."
+        prompt += "\n\nYou have FULL CONTROL. Decide: direction, leverage, position size %, stop-loss %, take-profit %. Respond ONLY with JSON."
 
         return prompt
 
     def get_signal_from_analysis(self, analysis: dict, base_signal: Signal) -> Signal:
-        """Convert Claude's analysis into a trading Signal."""
+        """Convert Claude's analysis into a trading Signal with full AI control."""
         if not analysis:
             return base_signal
 
@@ -249,6 +267,19 @@ Should I HOLD or CLOSE this position? If CLOSE, set decision to opposite directi
 
         # Combine reasons: AI reasoning + technical factors
         signal.reasons = [f"AI: {reasoning}"] + [f"• {r}" for r in reasons]
+
+        # Store AI-decided parameters on the signal
+        signal._ai_leverage = int(analysis.get("leverage", 5))
+        signal._ai_position_size_pct = float(analysis.get("position_size_pct", 10)) / 100.0
+        signal._ai_stop_loss_pct = float(analysis.get("stop_loss_pct", 1.5))
+        signal._ai_take_profit_pct = float(analysis.get("take_profit_pct", 3.0))
+        signal._ai_risk_level = analysis.get("risk_level", "MEDIUM")
+        signal._ai_urgency = analysis.get("urgency", "LOW")
+
+        # Add AI params to reasons for dashboard visibility
+        signal.reasons.append(f"AI Leverage: {signal._ai_leverage}x")
+        signal.reasons.append(f"AI SL: {signal._ai_stop_loss_pct}% / TP: {signal._ai_take_profit_pct}%")
+        signal.reasons.append(f"AI Position: {signal._ai_position_size_pct*100:.0f}% of balance")
 
         return signal
 

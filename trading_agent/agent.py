@@ -176,39 +176,26 @@ class TradingAgent:
         # Convert AI analysis to signal
         ai_signal = self.ai_brain.get_signal_from_analysis(analysis, tech_signal)
 
-        # COMBINE: AI decision has priority, but tech must at least partially agree
-        # This prevents trading against clear technical signals
+        # AI has FULL CONTROL - trust its decision
+        # Only log technical agreement/disagreement for info
         if ai_signal.side and tech_signal.side:
             if ai_signal.side == tech_signal.side:
-                # AI and technicals agree → boost confidence
-                combined_confidence = min(
-                    (ai_signal.confidence * 0.6 + tech_signal.confidence * 0.4),
-                    100,
-                )
-                ai_signal.confidence = combined_confidence
-                ai_signal.reasons.append(f"Technical confirmation ({tech_signal.confidence:.0f}%)")
-                logger.info(f"AI + Technicals AGREE: {ai_signal.side.value} @ {combined_confidence:.1f}%")
+                ai_signal.reasons.append(f"Technicals CONFIRM ({tech_signal.confidence:.0f}%)")
+                logger.info(f"AI decision: {ai_signal.side.value} | Technicals AGREE")
             else:
-                # AI and technicals disagree → reduce confidence significantly
-                ai_signal.confidence *= 0.4
-                ai_signal.reasons.append(f"Technical CONFLICT ({tech_signal.side.value} {tech_signal.confidence:.0f}%)")
-                logger.info(f"AI vs Technicals CONFLICT - reducing confidence")
-        elif ai_signal.side and not tech_signal.side:
-            # AI has a signal but technicals are neutral → moderate confidence
-            ai_signal.confidence *= 0.7
+                ai_signal.reasons.append(f"Technicals DISAGREE ({tech_signal.side.value} {tech_signal.confidence:.0f}%)")
+                logger.info(f"AI decision: {ai_signal.side.value} | Technicals disagree ({tech_signal.side.value})")
+        elif ai_signal.side:
             ai_signal.reasons.append("Technicals neutral")
 
-        # Apply AI-suggested SL/TP multipliers
-        sl_mult = analysis.get("suggested_sl_multiplier", 1.0)
-        tp_mult = analysis.get("suggested_tp_multiplier", 1.0)
-        if sl_mult != 1.0:
-            ai_signal.reasons.append(f"AI SL mult: {sl_mult:.1f}x")
-        if tp_mult != 1.0:
-            ai_signal.reasons.append(f"AI TP mult: {tp_mult:.1f}x")
-
-        # Store multipliers on signal for use in position opening
-        ai_signal._sl_multiplier = sl_mult
-        ai_signal._tp_multiplier = tp_mult
+        logger.info(
+            f"AI FULL CONTROL: {analysis.get('decision')} | "
+            f"Confidence: {analysis.get('confidence')}% | "
+            f"Leverage: {analysis.get('leverage')}x | "
+            f"Size: {analysis.get('position_size_pct')}% | "
+            f"SL: {analysis.get('stop_loss_pct')}% | "
+            f"TP: {analysis.get('take_profit_pct')}%"
+        )
 
         return ai_signal
 
@@ -239,7 +226,7 @@ class TradingAgent:
         self.account.loss_trades = sum(1 for t in self.trades if t.pnl <= 0)
 
     async def _open_position(self, signal: Signal):
-        """Open a new position based on signal."""
+        """Open a new position based on AI-decided parameters."""
         if not signal.side or not signal.indicators:
             return
 
@@ -247,43 +234,56 @@ class TradingAgent:
         if price <= 0:
             return
 
-        quantity = self.risk_manager.calculate_position_size(
-            self.account.balance, price, signal.indicators
-        )
-        if quantity <= 0:
-            logger.info("Position size too small, skipping")
+        # Use AI-decided parameters if available, otherwise fall back to config
+        ai_leverage = getattr(signal, '_ai_leverage', self.config.trading.leverage)
+        ai_position_pct = getattr(signal, '_ai_position_size_pct', self.config.trading.max_position_pct)
+        ai_sl_pct = getattr(signal, '_ai_stop_loss_pct', self.config.trading.stop_loss_pct)
+        ai_tp_pct = getattr(signal, '_ai_take_profit_pct', self.config.trading.take_profit_pct)
+
+        # Enforce hard limits for safety
+        ai_leverage = max(1, min(ai_leverage, self.config.trading.max_leverage))
+        ai_position_pct = max(0.05, min(ai_position_pct, 0.30))  # 5-30% of balance
+
+        # Calculate position size using AI-decided percentage
+        balance = self.account.balance
+        if balance <= 0:
+            logger.warning("Cannot open position: balance is 0")
             return
 
-        # Calculate SL/TP (use AI multipliers if available)
-        sl_mult = getattr(signal, '_sl_multiplier', 1.0)
-        tp_mult = getattr(signal, '_tp_multiplier', 1.0)
+        max_notional = balance * ai_position_pct
+        quantity = max_notional / price
 
-        stop_loss = self.risk_manager.calculate_stop_loss(
-            price, signal.side, signal.indicators
-        )
-        take_profit = self.risk_manager.calculate_take_profit(
-            price, signal.side, signal.indicators
-        )
+        if max_notional < self.config.trading.min_order_usdt:
+            logger.info(f"Position size too small (${max_notional:.2f} < ${self.config.trading.min_order_usdt}), skipping")
+            return
 
-        # Apply AI multipliers to SL/TP distance
-        if sl_mult != 1.0:
-            sl_distance = abs(price - stop_loss) * sl_mult
-            stop_loss = price - sl_distance if signal.side == Side.LONG else price + sl_distance
+        quantity = round(quantity, 6)
 
-        if tp_mult != 1.0:
-            tp_distance = abs(price - take_profit) * tp_mult
-            take_profit = price + tp_distance if signal.side == Side.LONG else price - tp_distance
+        # Calculate SL/TP using AI-decided percentages
+        sl_distance = price * (ai_sl_pct / 100)
+        tp_distance = price * (ai_tp_pct / 100)
+
+        if signal.side == Side.LONG:
+            stop_loss = round(price - sl_distance, 2)
+            take_profit = round(price + tp_distance, 2)
+        else:
+            stop_loss = round(price + sl_distance, 2)
+            take_profit = round(price - tp_distance, 2)
 
         logger.info(
             f"\n{'='*50}\n"
-            f"  OPENING {signal.side.value} @ {price:.2f}\n"
-            f"  Qty: {quantity:.6f} | Leverage: {self.config.trading.leverage}x\n"
-            f"  SL: {stop_loss:.2f} | TP: {take_profit:.2f}\n"
+            f"  AI OPENING {signal.side.value} @ {price:.2f}\n"
+            f"  Qty: {quantity:.6f} | AI Leverage: {ai_leverage}x\n"
+            f"  AI SL: {stop_loss:.2f} ({ai_sl_pct}%) | AI TP: {take_profit:.2f} ({ai_tp_pct}%)\n"
+            f"  Position: {ai_position_pct*100:.0f}% of ${balance:.2f} = ${max_notional:.2f}\n"
             f"  Confidence: {signal.confidence:.1f}%\n"
             f"  AI Reasoning: {self.ai_reasoning[:100]}\n"
-            f"  Reasons: {', '.join(signal.reasons[:5])}\n"
             f"{'='*50}"
         )
+
+        # Set leverage on exchange before opening
+        if not self.config.paper_trading:
+            await self.client.set_leverage(self.config.trading.symbol, ai_leverage)
 
         if self.config.paper_trading:
             self.position = Position(
@@ -291,9 +291,9 @@ class TradingAgent:
                 side=signal.side,
                 entry_price=price,
                 quantity=quantity,
-                leverage=self.config.trading.leverage,
-                stop_loss=round(stop_loss, 2),
-                take_profit=round(take_profit, 2),
+                leverage=ai_leverage,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
                 order_id=f"paper_{int(datetime.now().timestamp())}",
             )
         else:
@@ -301,7 +301,7 @@ class TradingAgent:
                 self.config.trading.symbol,
                 signal.side,
                 quantity,
-                self.config.trading.leverage,
+                ai_leverage,
             )
             if order_id:
                 self.position = Position(
@@ -309,9 +309,9 @@ class TradingAgent:
                     side=signal.side,
                     entry_price=price,
                     quantity=quantity,
-                    leverage=self.config.trading.leverage,
-                    stop_loss=round(stop_loss, 2),
-                    take_profit=round(take_profit, 2),
+                    leverage=ai_leverage,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
                     order_id=order_id,
                 )
 
@@ -418,7 +418,7 @@ class TradingAgent:
         return {
             "running": self.running,
             "symbol": self.config.trading.symbol,
-            "leverage": self.config.trading.leverage,
+            "leverage": self.position.leverage if self.position else self.config.trading.leverage,
             "mode": "PAPER" if self.config.paper_trading else "LIVE",
             "ai_enabled": self.ai_enabled,
             "ai_reasoning": self.ai_reasoning,
