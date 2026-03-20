@@ -70,7 +70,7 @@ class TradingConfig:
 class AIConfig:
     """Claude AI configuration."""
     api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
-    model: str = os.getenv("AI_MODEL", "claude-sonnet-4-20250514")
+    model: str = os.getenv("AI_MODEL", "claude-haiku-4-5-20251001")
     # How often to ask Claude (every N ticks)
     analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "1"))
     # Use AI for position close decisions too
