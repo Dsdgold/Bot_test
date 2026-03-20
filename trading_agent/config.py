@@ -46,7 +46,7 @@ class TradingConfig:
     # Timing
     candle_interval: str = "Min1"
     analysis_interval: int = 60  # Every 60 seconds — save API costs with Sonnet
-    cooldown_after_trade: int = 60  # Wait 60s between trades to avoid overtrading
+    cooldown_after_trade: int = 120  # Wait 120s between trades to avoid overtrading
 
     # Strategy thresholds
     rsi_oversold: float = 30.0

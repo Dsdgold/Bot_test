@@ -13,6 +13,7 @@ from .bybit_client import BybitClient
 from .strategy import ScalpingStrategy
 from .risk_manager import RiskManager
 from .ai_brain import ClaudeAIBrain
+from .persistence import BotDatabase
 from .models import (
     AccountState, Candle, MarketContext, Position, Signal, Side, Trade, Ticker
 )
@@ -69,6 +70,9 @@ class TradingAgent:
         self.best_session: str = "US"  # Best performing session
         self.best_hour_win_rate: dict = {}  # Hour -> win rate
 
+        # SQLite persistence
+        self.db = BotDatabase()
+
     async def start(self):
         """Start the trading agent."""
         logger.info("=" * 60)
@@ -83,11 +87,36 @@ class TradingAgent:
 
         self.running = True
 
+        # Restore state from DB
+        self.trades = self.db.load_trades(50)
+        saved_pos = self.db.load_position()
+
+        # Verify saved position against Bybit
+        if saved_pos and not self.config.paper_trading:
+            bybit_positions = await self.client.get_open_positions(self.config.trading.symbol)
+            if bybit_positions:
+                bp = bybit_positions[0]
+                size = float(bp.get("size", 0))
+                if size > 0:
+                    self.position = saved_pos
+                    logger.info(f"Position RESTORED: {saved_pos.side.value} @ {saved_pos.entry_price} (verified on Bybit)")
+                else:
+                    logger.info("Saved position not found on Bybit — clearing")
+                    self.db.clear_position()
+            else:
+                logger.info("No open positions on Bybit — clearing saved position")
+                self.db.clear_position()
+        elif saved_pos and self.config.paper_trading:
+            self.position = saved_pos
+            logger.info(f"Paper position restored: {saved_pos.side.value} @ {saved_pos.entry_price}")
+
         if not self.config.paper_trading:
             await self.client.set_leverage(
                 self.config.trading.symbol,
                 self.config.trading.leverage,
             )
+
+        logger.info(f"Loaded {len(self.trades)} trades from history")
 
         while self.running:
             try:
@@ -107,6 +136,7 @@ class TradingAgent:
 
         await self.client.close()
         await self.ai_brain.close()
+        self.db.close()
         logger.info("Agent stopped.")
 
     async def _tick(self):
@@ -518,13 +548,19 @@ class TradingAgent:
             stop_loss = round(price + sl_distance, 2)
             take_profit = round(price - tp_distance, 2)
 
+        # Fee-aware RR check
+        rr_ok, net_rr = self.risk_manager.is_rr_acceptable(price, stop_loss, take_profit, ai_leverage)
+        if not rr_ok:
+            logger.info(f"Trade rejected: fee-adjusted RR {net_rr:.2f} < 1.3 minimum")
+            return
+
         logger.info(
             f"\n{'='*50}\n"
             f"  AI OPENING {signal.side.value} @ {price:.2f}\n"
             f"  Qty: {quantity:.6f} | AI Leverage: {ai_leverage}x\n"
             f"  AI SL: {stop_loss:.2f} ({ai_sl_pct}%) | AI TP: {take_profit:.2f} ({ai_tp_pct}%)\n"
             f"  Position: {ai_position_pct*100:.0f}% of ${balance:.2f} = ${max_notional:.2f}\n"
-            f"  Confidence: {signal.confidence:.1f}%\n"
+            f"  Confidence: {signal.confidence:.1f}% | Fee-adj RR: {net_rr:.2f}\n"
             f"  AI Reasoning: {self.ai_reasoning[:100]}\n"
             f"{'='*50}"
         )
@@ -567,6 +603,15 @@ class TradingAgent:
                     order_id=order_id,
                     original_quantity=quantity,
                 )
+                # Set SL/TP on Bybit exchange
+                await self.client.set_stop_loss_take_profit(
+                    self.config.trading.symbol, order_id, stop_loss, take_profit
+                )
+                logger.info(f"SL/TP set on Bybit: SL={stop_loss} TP={take_profit}")
+
+        # Save position to DB for crash recovery
+        if self.position:
+            self.db.save_position(self.position)
 
     async def _monitor_position(self, tech_signal: Signal):
         """Monitor and manage open position with AI assistance."""
@@ -591,6 +636,9 @@ class TradingAgent:
         # No partial close — ride the FULL position to TP or SL
         # We're here to multiply, not collect crumbs
 
+        # Track old SL to detect trailing stop moves
+        old_sl = self.position.stop_loss
+
         # Check technical SL/TP and trailing stop
         should_close, reason = self.risk_manager.should_close_position(
             self.position, current_price, indicators
@@ -599,6 +647,17 @@ class TradingAgent:
         if should_close:
             await self._close_position(reason)
             return
+
+        # Sync trailing stop to Bybit if SL moved
+        if self.position.stop_loss != old_sl and not self.config.paper_trading:
+            await self.client.set_stop_loss_take_profit(
+                self.config.trading.symbol,
+                self.position.order_id,
+                self.position.stop_loss,
+                self.position.take_profit,
+            )
+            self.db.save_position(self.position)
+            logger.info(f"Bybit SL synced: {self.position.stop_loss}")
 
         # Ask AI if we should close (every N ticks, but respect minimum hold time)
         hold_time = (datetime.now() - self.position.open_time).total_seconds()
@@ -672,6 +731,8 @@ class TradingAgent:
 
         self.trades.append(trade)
         self.risk_manager.record_trade(trade)
+        self.db.save_trade(trade)
+        self.db.clear_position()
         self.position = None
 
     def get_state(self) -> dict:

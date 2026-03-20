@@ -11,6 +11,9 @@ from .models import AccountState, Indicators, Position, Side, Trade
 
 logger = logging.getLogger("risk_manager")
 
+# Bybit taker fee for USDT perpetuals
+TAKER_FEE_PCT = 0.055  # 0.055% per side
+
 
 class RiskManager:
     """Manages trading risk and position sizing."""
@@ -22,6 +25,7 @@ class RiskManager:
         self.current_date: date = date.today()
         self.last_trade_time: Optional[datetime] = None
         self.consecutive_losses: int = 0
+        self.loss_streak_pause_until: Optional[datetime] = None
 
     def reset_daily_if_needed(self):
         """Reset daily counters at midnight."""
@@ -32,6 +36,7 @@ class RiskManager:
             self.daily_trades = 0
             self.current_date = today
             self.consecutive_losses = 0
+            self.loss_streak_pause_until = None
 
     def can_trade(self, balance: float) -> tuple[bool, str]:
         """Check if trading is allowed based on risk rules."""
@@ -43,23 +48,70 @@ class RiskManager:
             if daily_loss_pct >= self.config.max_daily_loss_pct:
                 return False, f"Daily loss limit reached ({daily_loss_pct:.1f}%)"
 
-        # Cooldown after trade
+        # Loss streak pause — 30 min after 3 consecutive losses
+        if self.loss_streak_pause_until:
+            now = datetime.now()
+            if now < self.loss_streak_pause_until:
+                remaining = (self.loss_streak_pause_until - now).total_seconds()
+                return False, f"Loss streak pause ({self.consecutive_losses} losses): {remaining:.0f}s remaining"
+            else:
+                # Pause expired, reset
+                logger.info("Loss streak pause expired, resuming trading")
+                self.loss_streak_pause_until = None
+                self.consecutive_losses = 0
+
+        # Cooldown between trades — 120s minimum
         if self.last_trade_time:
             elapsed = (datetime.now() - self.last_trade_time).total_seconds()
-            if elapsed < self.config.cooldown_after_trade:
-                remaining = self.config.cooldown_after_trade - elapsed
+            cooldown = max(self.config.cooldown_after_trade, 120)
+            if elapsed < cooldown:
+                remaining = cooldown - elapsed
                 return False, f"Cooldown: {remaining:.0f}s remaining"
 
-        # Loss streak protection — after 3 consecutive losses, add extra cooldown
-        if self.consecutive_losses >= 3:
-            extra_cooldown = 180  # 3 minutes extra after 3 losses in a row
-            if self.last_trade_time:
-                elapsed = (datetime.now() - self.last_trade_time).total_seconds()
-                if elapsed < extra_cooldown:
-                    remaining = extra_cooldown - elapsed
-                    return False, f"Loss streak cooldown ({self.consecutive_losses} losses): {remaining:.0f}s remaining"
-
         return True, "OK"
+
+    def calculate_fee_adjusted_rr(
+        self, entry_price: float, stop_loss: float, take_profit: float, leverage: int
+    ) -> float:
+        """Calculate risk/reward ratio accounting for Bybit fees.
+
+        Fees: 0.055% taker × 2 (open + close) = 0.11% base
+        With leverage, fee impact on margin = 0.11% × leverage
+        """
+        if entry_price <= 0:
+            return 0.0
+
+        # Calculate raw distances as %
+        if take_profit > entry_price:  # LONG
+            tp_pct = (take_profit - entry_price) / entry_price * 100
+            sl_pct = (entry_price - stop_loss) / entry_price * 100
+        else:  # SHORT
+            tp_pct = (entry_price - take_profit) / entry_price * 100
+            sl_pct = (stop_loss - entry_price) / entry_price * 100
+
+        if sl_pct <= 0:
+            return 0.0
+
+        # Total fee cost: 2 × 0.055% = 0.11% of position
+        total_fee_pct = 2 * TAKER_FEE_PCT
+
+        # Adjust TP and SL for fees
+        net_tp_pct = tp_pct - total_fee_pct
+        net_sl_pct = sl_pct + total_fee_pct  # Fee makes loss worse
+
+        if net_sl_pct <= 0:
+            return 0.0
+
+        rr = net_tp_pct / net_sl_pct
+        return round(rr, 2)
+
+    def is_rr_acceptable(
+        self, entry_price: float, stop_loss: float, take_profit: float, leverage: int
+    ) -> tuple[bool, float]:
+        """Check if fee-adjusted RR is acceptable (>= 1.5)."""
+        rr = self.calculate_fee_adjusted_rr(entry_price, stop_loss, take_profit, leverage)
+        min_rr = 1.3  # Minimum acceptable RR after fees
+        return rr >= min_rr, rr
 
     def calculate_position_size(
         self, balance: float, price: float, indicators: Indicators
@@ -68,13 +120,10 @@ class RiskManager:
         if balance <= 0 or price <= 0:
             return 0.0
 
-        # Base position: percentage of balance — go big
+        # Base position: percentage of balance
         max_notional = balance * self.config.max_position_pct
 
-        # No ATR reduction — volatility is OPPORTUNITY, not risk
-        # No consecutive loss reduction — AI decides sizing, not fear
-
-        # Calculate quantity (contracts/coins)
+        # Calculate quantity
         quantity = max_notional / price
 
         # Ensure minimum order
@@ -87,7 +136,6 @@ class RiskManager:
         self, entry_price: float, side: Side, indicators: Indicators
     ) -> float:
         """Calculate dynamic stop-loss based on ATR."""
-        # Use ATR for dynamic SL, with minimum based on config
         atr_stop = indicators.atr * 1.5 if indicators.atr > 0 else 0
         pct_stop = entry_price * (self.config.stop_loss_pct / 100)
 
@@ -123,7 +171,6 @@ class RiskManager:
 
         leveraged_pnl_pct = pnl_pct * position.leverage
 
-        # How long has this position been open?
         hold_time_seconds = (datetime.now() - position.open_time).total_seconds()
         min_hold = getattr(self.config, 'min_hold_time', 120)
 
@@ -143,14 +190,13 @@ class RiskManager:
         dollar_pnl = pnl_pct / 100 * position.entry_price * position.quantity * position.leverage
 
         # Don't apply trailing/breakeven logic until minimum hold time passed
-        # This prevents closing trades too early before they can develop
         if hold_time_seconds < min_hold:
             return False, ""
 
         # After min hold time: move SL to break-even at $3+ profit
         if dollar_pnl >= 3.0:
             if position.side == Side.LONG:
-                be_sl = position.entry_price + 10  # Lock in small profit
+                be_sl = position.entry_price + 10
                 if be_sl > position.stop_loss:
                     position.stop_loss = round(be_sl, 2)
                     logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit, held {hold_time_seconds:.0f}s)")
@@ -160,9 +206,9 @@ class RiskManager:
                     position.stop_loss = round(be_sl, 2)
                     logger.info(f"SL moved to break-even+ (${dollar_pnl:.1f} profit, held {hold_time_seconds:.0f}s)")
 
-        # Trailing stop at $5+ profit — loose trail to let winners run
+        # Trailing stop at $5+ profit
         if dollar_pnl >= 5.0:
-            trail_pct = 0.004  # 0.4% trail — wide enough to avoid noise
+            trail_pct = 0.004  # 0.4% trail
             if position.side == Side.LONG:
                 new_sl = current_price * (1 - trail_pct)
                 if new_sl > position.stop_loss:
@@ -174,7 +220,7 @@ class RiskManager:
                     position.stop_loss = round(new_sl, 2)
                     logger.info(f"Trailing SL (${dollar_pnl:.1f} profit) moved to {position.stop_loss}")
 
-        # Force close only at $10+ to bank big wins (after hold time)
+        # Force close only at $10+ to bank big wins
         if dollar_pnl >= 10.0:
             return True, f"Big profit banked: ${dollar_pnl:.2f}"
 
@@ -188,6 +234,14 @@ class RiskManager:
 
         if trade.pnl < 0:
             self.consecutive_losses += 1
+            # 3 consecutive losses = 30 min pause
+            if self.consecutive_losses >= 3:
+                from datetime import timedelta
+                self.loss_streak_pause_until = datetime.now() + timedelta(minutes=30)
+                logger.warning(
+                    f"3 consecutive losses! Pausing trading for 30 minutes "
+                    f"(until {self.loss_streak_pause_until.strftime('%H:%M:%S')})"
+                )
         else:
             self.consecutive_losses = 0
 
