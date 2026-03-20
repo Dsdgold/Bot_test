@@ -128,36 +128,35 @@ class RiskManager:
         if position.side == Side.SHORT and current_price <= position.take_profit:
             return True, f"Take-profit hit at {current_price:.2f}"
 
-        # Trailing stop-loss (move SL in profit direction) — activate later to let winners RUN
-        if leveraged_pnl_pct > 3.0:
-            trail_pct = self.config.trailing_stop_pct / 100
+        # Aggressive trailing stop — lock in profits FAST
+        # Phase 1: As soon as we're in profit, start trailing TIGHT
+        if leveraged_pnl_pct > 1.0:
+            # Tight trailing: 0.3% from current price — lock those dollars in
+            trail_pct = 0.003  # 0.3% — very tight
             if position.side == Side.LONG:
                 new_sl = current_price * (1 - trail_pct)
                 if new_sl > position.stop_loss:
                     position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL moved to {position.stop_loss}")
+                    logger.info(f"Trailing SL (tight) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
             else:
                 new_sl = current_price * (1 + trail_pct)
                 if new_sl < position.stop_loss:
                     position.stop_loss = round(new_sl, 2)
-                    logger.info(f"Trailing SL moved to {position.stop_loss}")
+                    logger.info(f"Trailing SL (tight) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
 
-        # Trailing take-profit (move TP further when in strong profit)
+        # Phase 2: At 5%+ profit, give a bit more room to ride the trend
         if leveraged_pnl_pct > 5.0:
-            # When we're 2%+ in profit (leveraged), extend TP to ride the trend
-            tp_trail_pct = self.config.trailing_stop_pct / 100 * 2  # Wider than SL
+            trail_pct = 0.005  # 0.5% — slightly wider to ride big moves
             if position.side == Side.LONG:
-                new_tp = current_price * (1 + tp_trail_pct)
-                if new_tp > position.take_profit:
-                    old_tp = position.take_profit
-                    position.take_profit = round(new_tp, 2)
-                    logger.info(f"Trailing TP extended: {old_tp} -> {position.take_profit} (riding trend)")
+                new_sl = current_price * (1 - trail_pct)
+                if new_sl > position.stop_loss:
+                    position.stop_loss = round(new_sl, 2)
+                    logger.info(f"Trailing SL (wide) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
             else:
-                new_tp = current_price * (1 - tp_trail_pct)
-                if new_tp < position.take_profit:
-                    old_tp = position.take_profit
-                    position.take_profit = round(new_tp, 2)
-                    logger.info(f"Trailing TP extended: {old_tp} -> {position.take_profit} (riding trend)")
+                new_sl = current_price * (1 + trail_pct)
+                if new_sl < position.stop_loss:
+                    position.stop_loss = round(new_sl, 2)
+                    logger.info(f"Trailing SL (wide) moved to {position.stop_loss} | PnL: {leveraged_pnl_pct:.1f}%")
 
         # Trend reversal detection
         if position.side == Side.LONG:
