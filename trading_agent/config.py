@@ -28,12 +28,12 @@ class TradingConfig:
     # Symbol to trade (USDT perpetual futures)
     symbol: str = os.getenv("TRADING_SYMBOL", "BTCUSDT")
 
-    # Leverage settings (defaults — AI overrides these)
-    leverage: int = int(os.getenv("TRADING_LEVERAGE", "15"))
-    max_leverage: int = 25
+    # Leverage settings (defaults — AI decides actual leverage per trade)
+    leverage: int = int(os.getenv("TRADING_LEVERAGE", "20"))
+    max_leverage: int = 50  # AI can go up to 50x if confident
 
-    # Position sizing (defaults — AI overrides)
-    max_position_pct: float = 0.70  # Conservative sizing to survive losses
+    # Position sizing (defaults — AI decides actual sizing per trade)
+    max_position_pct: float = 0.90  # AI can use up to 90% if confident
     min_order_usdt: float = 1.0
 
     # Risk management (defaults — AI overrides)

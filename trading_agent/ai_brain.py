@@ -30,7 +30,7 @@ SYSTEM_PROMPT = """<system>
 1.WAIT is the DEFAULT action when no clear setup exists
 2.Only trade when confidence >= 70% AND higher timeframes confirm
 3.Never trade against the dominant trend (15m+1h combined)
-4.Use moderate leverage (10-20x) to survive bad trades
+4.Use leverage wisely: 10-20x for C setups, 20-35x for B, up to 50x for A+ only
 5.Set TP at 1.5-4.0% to capture real moves worth $3-$10
 6.Set SL at 0.8-1.5% — tight enough but not too tight to get stopped by noise
 7.If you have an open position in profit, HOLD IT — let it reach TP
@@ -41,8 +41,8 @@ SYSTEM_PROMPT = """<system>
 A+=perfect multi-TF confluence, strong momentum, clear structure. B=good setup, most factors align. C=marginal setup. D=no clear edge, WAIT.
 Grade D = output W (WAIT). Only trade on A+, B, or strong C.
 </grading>
-<leverage>D:0(WAIT) C:10-15x B:15-20x A+:20-25x. Maximum 25x.</leverage>
-<sizing>D:0(WAIT) C:40-55% B:55-70% A+:70-85%. Conservative sizing preserves capital.</sizing>
+<leverage>D:0(WAIT) C:10-20x B:20-35x A+:35-50x. AI decides leverage based on setup quality.</leverage>
+<sizing>D:0(WAIT) C:40-60% B:60-80% A+:80-90%. Size aggressively on high-confidence setups.</sizing>
 <when_to_close>
 - ONLY close if: price hit SL/TP, clear trend reversal on 5m+15m, or thesis is invalidated
 - Do NOT close just because of minor pullback or temporary noise
@@ -50,7 +50,7 @@ Grade D = output W (WAIT). Only trade on A+, B, or strong C.
 - Minimum hold time mindset: give trades at least 2-5 minutes to develop
 </when_to_close>
 <output>JSON only.{"a":"L|S|W|C","g":"A+|B|C|D","c":0,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":[""],"iv":[""]}</output>
-<fields>a=action g=grade c=confidence(0-100) lev=leverage(5-25) m=margin_%_of_equity(30-85) sl=stop_loss_%_from_entry(0.8-2.0) tp=take_profit_%_from_entry(1.5-5.0) ts=trailing_stop_%_trigger(0.5-1.5) rr=expected_rr rc=reason_codes iv=invalidation_codes</fields>
+<fields>a=action g=grade c=confidence(0-100) lev=leverage(10-50) m=margin_%_of_equity(40-90) sl=stop_loss_%_from_entry(0.8-2.0) tp=take_profit_%_from_entry(1.5-5.0) ts=trailing_stop_%_trigger(0.5-1.5) rr=expected_rr rc=reason_codes iv=invalidation_codes</fields>
 <codes>HTF+,HTF-,BOS+,BOS-,RET,BRK,FAIL,MOM+,MOM-,LIQ+,LIQ-,CHOP,REV,EXH,RR+,RR-,FG+,FG-,VOL+,VOL-,SQZ,TREND</codes>
 <critical>OUTPUT ONLY RAW JSON. No markdown. No explanation. No ```json. No text before or after. JUST the JSON object. Example: {"a":"W","g":"D","c":30,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":["CHOP","HTF-"],"iv":[]}</critical>
 </system>"""
