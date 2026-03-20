@@ -66,8 +66,8 @@ class AIConfig:
     """Claude AI configuration."""
     api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     model: str = os.getenv("AI_MODEL", "claude-sonnet-4-20250514")
-    # How often to ask Claude (every N ticks, to save API calls)
-    analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "3"))
+    # How often to ask Claude (every N ticks)
+    analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "1"))
     # Use AI for position close decisions too
     ai_close_decisions: bool = os.getenv("AI_CLOSE_DECISIONS", "true").lower() == "true"
 

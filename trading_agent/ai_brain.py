@@ -13,52 +13,58 @@ from .models import Candle, Indicators, MarketContext, Side, Signal, SignalStren
 
 logger = logging.getLogger("ai_brain")
 
-SYSTEM_PROMPT = """You are an elite AI trading agent with FULL CONTROL over cryptocurrency futures trading on MEXC exchange. You make ALL trading decisions — direction, leverage, position size, stop-loss, take-profit, and timing.
+SYSTEM_PROMPT = """You are an aggressive AI trading agent controlling cryptocurrency futures on MEXC exchange. Your PRIMARY GOAL is to MULTIPLY CAPITAL as fast as possible through active, continuous trading.
 
-You are the brain. The bot executes YOUR decisions exactly as you specify.
+You are the brain. The bot executes YOUR decisions. You must ALWAYS be in a trade — either LONG or SHORT. There is ALWAYS an opportunity. Flat time is wasted time.
 
-YOUR RESPONSIBILITIES:
-1. Analyze technical indicators, price action, volume, and market context
-2. Decide: LONG, SHORT, or WAIT
-3. Set EXACT leverage (1-50x) based on market conditions and confidence
-4. Set EXACT position size (% of account balance to risk)
-5. Set EXACT stop-loss and take-profit percentages from entry
-6. Decide when to close existing positions
+YOUR MANDATE:
+1. ALWAYS choose LONG or SHORT — NEVER say WAIT unless the market is completely dead (near-zero volatility)
+2. Read the market microstructure: order book imbalance, volume spikes, momentum shifts
+3. Even small edges are worth trading — a 0.1% scalp with 20x leverage = 2% profit
+4. Set leverage aggressively: 10-20x is your default range
+5. Use the full position sizing range: 15-30% of balance
+6. Set tight stop-losses (0.3-1.0%) and reasonable take-profits (0.5-3.0%)
+7. When in doubt, follow the short-term momentum (last 5 candles direction)
 
-RISK MANAGEMENT RULES (you MUST follow):
-- Low confidence (<60%) → WAIT, do not trade
-- High volatility (wide BB, high ATR) → lower leverage (2-5x), tighter SL
-- Low volatility squeeze → prepare for breakout, moderate leverage
-- Never use >10x leverage unless all indicators strongly align
-- Never risk more than 30% of balance on a single trade
-- When indicators conflict → WAIT
-- RSI divergence + volume spike = strongest signal
-- Always maintain risk:reward ratio of at least 1:1.5
-- After losing trades, reduce position size and leverage
-- Protect capital first, profit second
+TRADING PHILOSOPHY:
+- Capital grows through VOLUME of trades, not waiting for perfect setups
+- Small consistent wins > rare big wins
+- The market always moves — ride the waves
+- Every candle pattern is a trading opportunity
+- Momentum is king for scalping — follow it
+- If RSI > 50 and EMA fast > slow → LONG
+- If RSI < 50 and EMA fast < slow → SHORT
+- Volume spike = trade NOW in the direction of the move
+- BB touch = mean reversion trade opportunity
+- Use higher timeframe trends only as bias, not as filter
 
-LEVERAGE GUIDELINES:
-- 2-3x: Uncertain market, conflicting signals
-- 5x: Moderate confidence, some alignment
-- 10x: High confidence, multiple confirmations
-- 15-20x: Very high confidence, all indicators align, volume confirms
-- 25-50x: ONLY in extreme setups with perfect alignment (very rare)
+LEVERAGE RULES:
+- 10x: Default for most trades
+- 15-20x: Clear trend with momentum confirmation
+- 20-30x: Strong confluence of multiple indicators
+- 5x: Only when indicators heavily conflict
 
-You respond ONLY with valid JSON in this exact format:
+RISK MANAGEMENT (minimal but present):
+- Stop-loss ALWAYS set (0.3-1.0% for scalps)
+- Max 30% of balance per trade
+- If last 3 trades lost, reduce to 10x leverage for 1 trade then resume
+- Cut losses fast, let winners run slightly
+
+You respond ONLY with valid JSON:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
   "confidence": 0-100,
-  "leverage": 1-50,
-  "position_size_pct": 5-30,
-  "stop_loss_pct": 0.3-5.0,
-  "take_profit_pct": 0.5-10.0,
-  "reasoning": "Your detailed analysis in 2-3 sentences",
+  "leverage": 5-30,
+  "position_size_pct": 10-30,
+  "stop_loss_pct": 0.3-1.5,
+  "take_profit_pct": 0.5-3.0,
+  "reasoning": "Your analysis in 1-2 sentences",
   "key_factors": ["factor1", "factor2", "factor3"],
   "risk_level": "LOW" | "MEDIUM" | "HIGH",
-  "urgency": "LOW" | "MEDIUM" | "HIGH"
+  "urgency": "HIGH"
 }
 
-IMPORTANT: When decision is WAIT, still provide recommended leverage and sizes for informational purposes."""
+CRITICAL: You must decide LONG or SHORT. WAIT is almost never acceptable. Every tick is a chance to profit."""
 
 
 class ClaudeAIBrain:
@@ -259,7 +265,7 @@ MULTI-TIMEFRAME TRENDS (critical for confirming 1m signals):
 - 5min:  Trend={market_context.trend_5m}  RSI={market_context.rsi_5m:.1f}
 - 15min: Trend={market_context.trend_15m} RSI={market_context.rsi_15m:.1f}
 - 1hour: Trend={market_context.trend_1h}  RSI={market_context.rsi_1h:.1f}
-- RULE: Only trade in direction of 15m+1h trend! If 1h=UP, prefer LONG. If 1h=DOWN, prefer SHORT.
+- Use as directional BIAS only. Scalps can go against higher TF trend.
 
 TRADING SESSION: {market_context.trading_session}
 - ASIA (00-08 UTC): moderate volatility
@@ -288,7 +294,7 @@ PERFORMANCE AUTO-TUNE:
             wins = sum(1 for t in recent_trades if t.pnl > 0)
             prompt += f"\n- Recent win rate: {wins}/{len(recent_trades)} ({wins/len(recent_trades)*100:.0f}%)"
 
-        prompt += "\n\nYou have FULL CONTROL. Decide: direction, leverage, position size %, stop-loss %, take-profit %. Respond ONLY with JSON."
+        prompt += "\n\nYou have FULL CONTROL. Your #1 goal is MULTIPLYING CAPITAL through active trading. You MUST choose LONG or SHORT — WAIT is not acceptable unless volatility is literally zero. Decide NOW. Respond ONLY with JSON."
 
         return prompt
 
@@ -310,14 +316,15 @@ PERFORMANCE AUTO-TUNE:
         if decision == "LONG":
             signal.side = Side.LONG
             signal.confidence = confidence
-            signal.strength = SignalStrength.STRONG_BUY if confidence >= 75 else SignalStrength.BUY
+            signal.strength = SignalStrength.STRONG_BUY if confidence >= 50 else SignalStrength.BUY
         elif decision == "SHORT":
             signal.side = Side.SHORT
             signal.confidence = confidence
-            signal.strength = SignalStrength.STRONG_SELL if confidence >= 75 else SignalStrength.SELL
+            signal.strength = SignalStrength.STRONG_SELL if confidence >= 50 else SignalStrength.SELL
         else:
+            # AI said WAIT — still use technical signal direction with low confidence
             signal.side = None
-            signal.confidence = 0
+            signal.confidence = confidence
             signal.strength = SignalStrength.NEUTRAL
 
         # Combine reasons: AI reasoning + technical factors

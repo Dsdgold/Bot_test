@@ -358,14 +358,8 @@ class TradingAgent:
         return 100 - (100 / (1 + rs))
 
     async def _generate_ai_signal(self, tech_signal: Signal) -> Signal:
-        """Combine technical analysis with Claude AI reasoning."""
-        # Only call AI every N ticks to save API costs
-        use_ai = (
-            self.ai_enabled
-            and self.tick_count % self.config.ai.analysis_every_n_ticks == 0
-        )
-
-        if not use_ai:
+        """AI is the PRIMARY decision maker. Called every tick."""
+        if not self.ai_enabled:
             return tech_signal
 
         # Ask Claude to analyze the market with full context
