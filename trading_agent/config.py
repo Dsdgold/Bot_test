@@ -45,7 +45,7 @@ class TradingConfig:
 
     # Timing
     candle_interval: str = "Min1"
-    analysis_interval: int = 30  # Every 30 seconds — give market time to move
+    analysis_interval: int = 60  # Every 60 seconds — save API costs with Sonnet
     cooldown_after_trade: int = 60  # Wait 60s between trades to avoid overtrading
 
     # Strategy thresholds
@@ -73,7 +73,7 @@ class TradingConfig:
 class AIConfig:
     """Claude AI configuration."""
     api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
-    model: str = os.getenv("AI_MODEL", "claude-haiku-4-5-20251001")
+    model: str = os.getenv("AI_MODEL", "claude-sonnet-4-20250514")
     # How often to ask Claude (every N ticks) — higher = less frequent close checks
     analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "4"))
     # Use AI for position close decisions too

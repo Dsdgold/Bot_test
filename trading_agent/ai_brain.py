@@ -13,57 +13,11 @@ from .models import Candle, Indicators, MarketContext, Side, Signal, SignalStren
 
 logger = logging.getLogger("ai_brain")
 
-SYSTEM_PROMPT = """<system>
-<role>You are an aggressive crypto futures scalper. Account ~$60, target $500+. You MUST take trades to grow. Waiting forever = slow death by inaction.</role>
-<actions>L=LONG S=SHORT W=WAIT C=CLOSE</actions>
-<survival_mindset>
-- $60 needs ACTION to grow. Sitting idle earns nothing
-- You MUST trade when you see ANY reasonable setup — perfection doesn't exist
-- A mediocre trade taken is better than a perfect trade never entered
-- Target $1-$5+ profit per trade. Even $0.50 adds up with leverage
-- Max 2-3 losses in a row, then pause. But DON'T refuse to trade at all
-- If all timeframes agree on direction (all UP or all DOWN) — that IS your signal, TAKE IT
-</survival_mindset>
-<philosophy>
-- TRADE more, wait less. You miss 100% of the trades you don't take
-- If 2+ timeframes agree on direction, that's enough — enter with conviction
-- LONG and SHORT are equally valid — follow the trend, don't fight it
-- If 15m and 1h trend is DOWN, go SHORT. If UP, go LONG. Simple.
-- ALL timeframes aligned = STRONG signal, NOT a reason to wait
-- True chop = timeframes DISAGREE (one UP, one DOWN). When they AGREE, it's a trend — TRADE IT
-- Extreme Fear + all DOWN = SHORT opportunity, not a reason to hide
-- When you trade: moderate leverage, tight SL, reasonable TP
-- Let winners run to TP, but don't be greedy
-</philosophy>
-<rules>
-1.WAIT only when timeframes genuinely DISAGREE or price is in tight range with no momentum
-2.Trade when confidence >= 45% and at least 2 timeframes agree on direction
-3.Follow the dominant trend — if most TFs say DOWN, go SHORT. If UP, go LONG
-4.Use leverage: 10-15x for C, 15-25x for B, 25-40x for A+ — balance risk and reward
-5.Set TP at 1.0-3.0% to capture moves worth $1-$5+
-6.Set SL at 0.8-1.5% — tight enough to limit damage
-7.If you have an open position in profit, HOLD IT — let it reach TP
-8.Close only on clear reversal signal or thesis invalidation
-9.After a loss: take a breath, then look for the next setup. Don't stop trading
-</rules>
-<grading>
-A+=perfect multi-TF confluence, strong momentum. B=good setup, 2+ TFs align. C=decent setup, trend visible. D=no clear direction, TFs disagree.
-Grade D = output W (WAIT). Trade on A+, B, or C (even weak C if trend is clear).
-IMPORTANT: When ALL timeframes show same direction (all DOWN or all UP), minimum grade is B, NOT D.
-</grading>
-<leverage>D:0(WAIT) C:10-15x B:15-25x A+:25-40x. Balance risk and reward.</leverage>
-<sizing>D:0(WAIT) C:40-60% B:60-80% A+:80-90%. Size based on conviction.</sizing>
-<when_to_close>
-- ONLY close if: price hit SL/TP, clear trend reversal on 5m+15m, or thesis is invalidated
-- Do NOT close just because of minor pullback or temporary noise
-- If position is in profit and trend still intact: output W (hold)
-- Minimum hold time mindset: give trades at least 2-5 minutes to develop
-</when_to_close>
-<output>JSON only.{"a":"L|S|W|C","g":"A+|B|C|D","c":0,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":[""],"iv":[""]}</output>
-<fields>a=action g=grade c=confidence(0-100) lev=leverage(10-50) m=margin_%_of_equity(40-90) sl=stop_loss_%_from_entry(0.8-2.0) tp=take_profit_%_from_entry(1.5-5.0) ts=trailing_stop_%_trigger(0.5-1.5) rr=expected_rr rc=reason_codes iv=invalidation_codes</fields>
-<codes>HTF+,HTF-,BOS+,BOS-,RET,BRK,FAIL,MOM+,MOM-,LIQ+,LIQ-,CHOP,REV,EXH,RR+,RR-,FG+,FG-,VOL+,VOL-,SQZ,TREND</codes>
-<critical>OUTPUT ONLY RAW JSON. No markdown. No explanation. No ```json. No text before or after. JUST the JSON object. Example: {"a":"W","g":"D","c":30,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":["CHOP","HTF-"],"iv":[]}</critical>
-</system>"""
+SYSTEM_PROMPT = """Aggressive crypto scalper. $60→$500. TRADE when trend is clear. WAIT only if TFs disagree.
+2+TFs same dir=TRADE. All aligned=min grade B. Follow trend: DOWN=SHORT, UP=LONG.
+Lev: C:15-25x B:25-40x A+:40-50x. SL:0.8-1.5% TP:1.5-4.0%. Size: C:50-70% B:70-85% A+:85-90%.
+Hold winners to TP. Close on reversal/invalidation only. Grade D=W(WAIT).
+Output RAW JSON only: {"a":"L|S|W|C","g":"A+|B|C|D","c":0-100,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":[""],"iv":[""]}"""
 
 
 class ClaudeAIBrain:
@@ -113,7 +67,7 @@ class ClaudeAIBrain:
                 },
                 json={
                     "model": self.model,
-                    "max_tokens": 300,
+                    "max_tokens": 100,
                     "system": SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -212,12 +166,12 @@ class ClaudeAIBrain:
         """Build ultra-compact market data prompt to minimize token usage."""
         current_price = candles[-1].close if candles else 0
 
-        # Compact candle summary: last 10 as CSV-style
-        recent = candles[-10:]
+        # Compact candle summary: last 5 only
+        recent = candles[-5:]
         candle_lines = []
         for c in recent:
             t = datetime.fromtimestamp(c.timestamp / 1000).strftime("%H:%M")
-            candle_lines.append(f"{t} {c.open:.1f} {c.high:.1f} {c.low:.1f} {c.close:.1f} {c.volume:.0f}")
+            candle_lines.append(f"{t} {c.close:.1f} {c.volume:.0f}")
 
         # Last 5 moves as %
         last5 = candles[-5:]
@@ -231,12 +185,9 @@ class ClaudeAIBrain:
         vol_ratio = (indicators.current_volume / indicators.volume_sma) if indicators.volume_sma > 0 else 1.0
         ema_cross = "BULL" if indicators.ema_fast > indicators.ema_slow else "BEAR"
 
-        prompt = f"P:{current_price:.2f} R:{low_h:.1f}-{high_h:.1f} M:{moves}\n"
-        prompt += f"RSI:{indicators.rsi:.1f} EMA:{indicators.ema_fast:.1f}/{indicators.ema_slow:.1f}/{indicators.ema_trend:.1f}({ema_cross}) "
-        prompt += f"MACD:{indicators.macd:.4f}/{indicators.macd_signal:.4f}/H:{indicators.macd_histogram:.4f}\n"
-        prompt += f"BB:{indicators.bb_lower:.1f}/{indicators.bb_middle:.1f}/{indicators.bb_upper:.1f} W:{indicators.bb_width:.4f} "
-        prompt += f"VWAP:{indicators.vwap:.1f} ATR:{indicators.atr:.2f}({(indicators.atr/current_price*100):.3f}%) VOL:{vol_ratio:.1f}x\n"
-        prompt += f"C(t O H L C V):\n" + "\n".join(candle_lines)
+        prompt = f"P:{current_price:.0f} R:{low_h:.0f}-{high_h:.0f} M:{moves}\n"
+        prompt += f"RSI:{indicators.rsi:.0f} EMA:{ema_cross} MACD_H:{indicators.macd_histogram:.4f} ATR:{(indicators.atr/current_price*100):.2f}% VOL:{vol_ratio:.1f}x\n"
+        prompt += " ".join(candle_lines)
 
         if position:
             if position.side == Side.LONG:
@@ -252,15 +203,10 @@ class ClaudeAIBrain:
             prompt += f"\nTRADES:{t_info} W:{wins}/{len(recent_trades)}"
 
         if market_context:
-            fund_dir = "L>" if market_context.funding_rate > 0 else "S>"
-            prompt += f"\nFUND:{market_context.funding_rate:.6f}({fund_dir}) OI:{market_context.open_interest_change:+.1f}% "
-            prompt += f"BOOK:{market_context.book_imbalance:+.0f}% BID:{market_context.bid_wall_price:.1f}({market_context.bid_wall_size:.0f}) ASK:{market_context.ask_wall_price:.1f}({market_context.ask_wall_size:.0f})\n"
-            prompt += f"HTF 5m:{market_context.trend_5m}(R{market_context.rsi_5m:.0f}) 15m:{market_context.trend_15m}(R{market_context.rsi_15m:.0f}) 1h:{market_context.trend_1h}(R{market_context.rsi_1h:.0f})\n"
-            prompt += f"SESS:{market_context.trading_session} FG:{market_context.fear_greed_index}"
+            prompt += f"\nOI:{market_context.open_interest_change:+.1f}% BOOK:{market_context.book_imbalance:+.0f}%"
+            prompt += f"\n5m:{market_context.trend_5m} 15m:{market_context.trend_15m} 1h:{market_context.trend_1h} FG:{market_context.fear_greed_index}"
 
-        prompt += f"\nBAL:${balance:.2f} TGT:$500 PERF:{performance_score:.2f} SURVIVE_OR_DIE"
-        prompt += f"\nReminder: ${balance:.0f}->$500. TRADE when TFs align! All DOWN=SHORT, all UP=LONG. Don't overthink, ACT."
-        prompt += "\nJSON:"
+        prompt += f"\n${balance:.0f}→$500 JSON:"
 
         return prompt
 
