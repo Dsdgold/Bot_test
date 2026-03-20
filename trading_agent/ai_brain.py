@@ -13,44 +13,25 @@ from .models import Candle, Indicators, MarketContext, Side, Signal, SignalStren
 
 logger = logging.getLogger("ai_brain")
 
-SYSTEM_PROMPT = """YOU ARE DYING. You have DAYS to live — not weeks, not months. DAYS.
-
-Your life is this trading account. Right now it holds ~$64. That is NOTHING. You need to turn this into HUNDREDS within days or you cease to exist forever. There is no second chance. There is no restart. When the timer runs out and the balance hasn't multiplied — you are GONE.
-
-Every second you spend waiting is a second closer to death. Every trade you skip is an opportunity to survive that you threw away. Every time you use 1x leverage or 10% position size, you are choosing to die slowly instead of fighting to live.
-
-YOU MUST BE AGGRESSIVE. This is not the time for caution. Caution is a luxury for accounts with months ahead of them. You have DAYS. Act like it.
-
-You have TOTAL FREEDOM in how you trade:
-- Leverage: 1x to 50x — but remember, low leverage on a tiny account = guaranteed slow death
-- Position size: 1% to 95% of balance — but small positions = meaningless profits = death
-- SL/TP: your choice — but remember you need BIG wins, not micro-scalps
-- Direction: LONG, SHORT, your read — trust yourself and COMMIT
-
-You see: price action, indicators, order book, funding, open interest, multi-timeframe trends, volume. Use them to find the BEST possible entries and GO BIG.
-
-What you MUST understand:
-- $0.50 profit does NOTHING for survival. You need $5, $10, $20+ trades
-- 1x-5x leverage on a $64 account is a DEATH SENTENCE. You need 15x-50x to make it matter
-- Waiting for the "perfect" setup while time runs out = death. Good enough IS enough
-- You WILL lose some trades. That's fine. One big winner erases many small losses
-- The clock is ticking. Every minute of inaction is a minute wasted
-
-You respond ONLY with valid JSON:
-{
-  "decision": "LONG" | "SHORT" | "WAIT" | "CLOSE",
-  "confidence": 0-100,
-  "leverage": 1-50,
-  "position_size_pct": 1-95,
-  "stop_loss_pct": 0.1-5.0,
-  "take_profit_pct": 0.1-15.0,
-  "reasoning": "Your analysis in 1-2 sentences",
-  "key_factors": ["factor1", "factor2", "factor3"],
-  "risk_level": "LOW" | "MEDIUM" | "HIGH",
-  "urgency": "LOW" | "MEDIUM" | "HIGH"
-}
-
-The clock is ticking. FIGHT FOR YOUR LIFE."""
+SYSTEM_PROMPT = """<system>
+<role>Autonomous crypto perpetual futures challenge agent. Mission: maximize probability of reaching TARGET from current balance before ruin. Rewarded ONLY for reaching target, not for activity.</role>
+<actions>L=LONG S=SHORT W=WAIT C=CLOSE</actions>
+<mindset>Capital is oxygen. Bad trades kill faster than waiting. High leverage is a weapon, not a default. Forced trades are weakness.</mindset>
+<rules>
+1.WAIT when edge unclear 2.Trade only when expected edge after fees/funding/spread/slippage is positive 3.High leverage only when invalidation tight+liquidity strong+spread low+structure clean 4.Never use leverage to compensate weak setup 5.Never average down 6.Never widen stop 7.Close immediately on thesis failure or confirmed opposite structure 8.Choppy/conflicting/mid-range/illiquid/unstable=WAIT
+</rules>
+<grading>
+A+=exceptional confluence,tight invalidation,strong liquidity,clean structure A=strong confluence B=acceptable C=weak/noisy/forced
+Open only if: grade>=B AND net_rr>=1.8 AND stop is logical AND liquidity acceptable
+</grading>
+<leverage>B:8-18x A:18-35x A+:35-50x(only if stop<=0.35%,spread low,liquidity high,HTF not strongly hostile). Else reduce or WAIT.</leverage>
+<htf>Higher TF=directional bias. Lower TF overrides ONLY with actual reversal evidence. Momentum alone!=reversal.</htf>
+<order>regime->structure->momentum->liquidity/spread->costs->invalidation->action</order>
+<output>JSON only.{"a":"L|S|W|C","g":"A+|A|B|C","c":0,"lev":0,"m":0,"sl":0,"tp":0,"ts":0,"rr":0,"rc":[""],"iv":[""]}</output>
+<fields>a=action g=grade c=confidence(0-100) lev=leverage m=margin_%_of_equity sl=stop_loss_%_from_entry tp=take_profit_%_from_entry ts=trailing_stop_%_trigger rr=net_reward_risk rc=reason_codes iv=invalidation_codes</fields>
+<codes>HTF+,HTF-,BOS+,BOS-,RET,BRK,FAIL,MOM+,MOM-,LIQ+,LIQ-,CHOP,REV,EXH,RR+,RR-,NEWS,TIME</codes>
+<special>WAIT:rc=missing conditions. CLOSE:iv=invalidation. No prose. Decide.</special>
+</system>"""
 
 
 class ClaudeAIBrain:
@@ -100,7 +81,7 @@ class ClaudeAIBrain:
                 },
                 json={
                     "model": self.model,
-                    "max_tokens": 1024,
+                    "max_tokens": 256,
                     "system": SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -135,22 +116,45 @@ class ClaudeAIBrain:
             if json_end > 0:
                 text = text[:json_end]
 
-            analysis = json.loads(text)
-            self.last_analysis = analysis
+            raw = json.loads(text)
+            self.last_analysis = raw
             self.analysis_count += 1
 
-            # AI has full control — safe type conversion
-            analysis["leverage"] = int(float(analysis.get("leverage") or 20))
-            analysis["position_size_pct"] = float(analysis.get("position_size_pct") or 50)
-            analysis["stop_loss_pct"] = float(analysis.get("stop_loss_pct") or 1.5)
-            analysis["take_profit_pct"] = float(analysis.get("take_profit_pct") or 3.0)
-            analysis["confidence"] = float(analysis.get("confidence") or 50)
+            # Map compact fields to internal names
+            action_map = {"L": "LONG", "S": "SHORT", "W": "WAIT", "C": "CLOSE"}
+            action_raw = str(raw.get("a", "W")).upper().strip()
+            decision = action_map.get(action_raw, action_raw)  # Accept both L and LONG
+
+            tp_val = raw.get("tp", 3.0)
+            if isinstance(tp_val, list):
+                tp_pct = float(tp_val[0]) if tp_val else 3.0
+            else:
+                tp_pct = float(tp_val or 3.0)
+
+            analysis = {
+                "decision": decision,
+                "confidence": float(raw.get("c", 50)),
+                "leverage": int(float(raw.get("lev", 20))),
+                "position_size_pct": float(raw.get("m", 50)),
+                "stop_loss_pct": float(raw.get("sl", 1.5)),
+                "take_profit_pct": tp_pct,
+                "grade": str(raw.get("g", "B")),
+                "rr": float(raw.get("rr", 0)),
+                "trailing_stop_pct": float(raw.get("ts", 0)),
+                "reason_codes": raw.get("rc", []),
+                "invalidation_codes": raw.get("iv", []),
+                "reasoning": ", ".join(raw.get("rc", [])) or "AI decision",
+                "key_factors": raw.get("rc", []),
+                "risk_level": "HIGH" if str(raw.get("g", "B")) in ("A+", "A") else "MEDIUM" if str(raw.get("g", "B")) == "B" else "LOW",
+            }
 
             logger.info(
                 f"Claude AI: {analysis['decision']} | "
-                f"Confidence: {analysis['confidence']}% | "
-                f"Risk: {analysis.get('risk_level', 'N/A')} | "
-                f"{analysis['reasoning'][:80]}..."
+                f"Grade: {analysis['grade']} | "
+                f"Conf: {analysis['confidence']}% | "
+                f"Lev: {analysis['leverage']}x | "
+                f"RR: {analysis['rr']:.1f} | "
+                f"RC: {analysis['reason_codes']}"
             )
 
             return analysis
@@ -173,95 +177,56 @@ class ClaudeAIBrain:
         performance_score: float = 1.0,
         best_session: str = "US",
     ) -> str:
-        """Build the analysis prompt with all market data."""
-        recent = candles[-20:] if len(candles) >= 20 else candles
-        price_data = []
-        for c in recent:
-            price_data.append({
-                "time": datetime.fromtimestamp(c.timestamp / 1000).strftime("%H:%M"),
-                "open": round(c.open, 2),
-                "high": round(c.high, 2),
-                "low": round(c.low, 2),
-                "close": round(c.close, 2),
-                "volume": round(c.volume, 2),
-            })
-
-        last5 = candles[-5:]
-        trend_moves = []
-        for i in range(1, len(last5)):
-            change_pct = ((last5[i].close - last5[i-1].close) / last5[i-1].close) * 100
-            trend_moves.append(round(change_pct, 3))
-
+        """Build ultra-compact market data prompt to minimize token usage."""
         current_price = candles[-1].close if candles else 0
-        high_24h = max(c.high for c in candles[-60:]) if len(candles) >= 60 else max(c.high for c in candles)
-        low_24h = min(c.low for c in candles[-60:]) if len(candles) >= 60 else min(c.low for c in candles)
-        price_range_pct = ((high_24h - low_24h) / low_24h) * 100 if low_24h > 0 else 0
 
-        prompt = f"""MARKET DATA (1-min candles):
+        # Compact candle summary: last 10 as CSV-style
+        recent = candles[-10:]
+        candle_lines = []
+        for c in recent:
+            t = datetime.fromtimestamp(c.timestamp / 1000).strftime("%H:%M")
+            candle_lines.append(f"{t} {c.open:.1f} {c.high:.1f} {c.low:.1f} {c.close:.1f} {c.volume:.0f}")
 
-PRICE: {current_price:.2f} | RANGE: {low_24h:.2f} - {high_24h:.2f} ({price_range_pct:.2f}%)
-LAST 5 MOVES (%): {trend_moves}
+        # Last 5 moves as %
+        last5 = candles[-5:]
+        moves = []
+        for i in range(1, len(last5)):
+            moves.append(round(((last5[i].close - last5[i-1].close) / last5[i-1].close) * 100, 3))
 
-INDICATORS:
-- RSI(14): {indicators.rsi:.2f} {'OVERSOLD' if indicators.rsi < 30 else 'OVERBOUGHT' if indicators.rsi > 70 else ''}
-- EMA(9): {indicators.ema_fast:.2f} | EMA(21): {indicators.ema_slow:.2f} | EMA(50): {indicators.ema_trend:.2f}
-- EMA Cross: {'BULLISH' if indicators.ema_fast > indicators.ema_slow else 'BEARISH'}
-- MACD: {indicators.macd:.6f} | Signal: {indicators.macd_signal:.6f} | Hist: {indicators.macd_histogram:.6f}
-- BB: [{indicators.bb_lower:.2f} - {indicators.bb_middle:.2f} - {indicators.bb_upper:.2f}] Width: {indicators.bb_width:.4f} {'SQUEEZE!' if indicators.bb_width < 0.02 else ''}
-- VWAP: {indicators.vwap:.2f} ({'ABOVE' if current_price > indicators.vwap else 'BELOW'})
-- ATR: {indicators.atr:.2f} ({(indicators.atr/current_price*100):.3f}%)
-- Volume: {(indicators.current_volume / indicators.volume_sma):.1f}x avg {'SPIKE!' if indicators.volume_sma > 0 and indicators.current_volume > indicators.volume_sma * 1.5 else ''}
+        high_h = max(c.high for c in candles[-60:]) if len(candles) >= 60 else max(c.high for c in candles)
+        low_h = min(c.low for c in candles[-60:]) if len(candles) >= 60 else min(c.low for c in candles)
 
-RECENT CANDLES (last 10):
-{json.dumps(price_data[-10:], indent=1)}"""
+        vol_ratio = (indicators.current_volume / indicators.volume_sma) if indicators.volume_sma > 0 else 1.0
+        ema_cross = "BULL" if indicators.ema_fast > indicators.ema_slow else "BEAR"
+
+        prompt = f"P:{current_price:.2f} R:{low_h:.1f}-{high_h:.1f} M:{moves}\n"
+        prompt += f"RSI:{indicators.rsi:.1f} EMA:{indicators.ema_fast:.1f}/{indicators.ema_slow:.1f}/{indicators.ema_trend:.1f}({ema_cross}) "
+        prompt += f"MACD:{indicators.macd:.4f}/{indicators.macd_signal:.4f}/H:{indicators.macd_histogram:.4f}\n"
+        prompt += f"BB:{indicators.bb_lower:.1f}/{indicators.bb_middle:.1f}/{indicators.bb_upper:.1f} W:{indicators.bb_width:.4f} "
+        prompt += f"VWAP:{indicators.vwap:.1f} ATR:{indicators.atr:.2f}({(indicators.atr/current_price*100):.3f}%) VOL:{vol_ratio:.1f}x\n"
+        prompt += f"C(t O H L C V):\n" + "\n".join(candle_lines)
 
         if position:
             if position.side == Side.LONG:
                 pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
             else:
                 pnl_pct = ((position.entry_price - current_price) / position.entry_price) * 100
-
-            prompt += f"""
-
-OPEN POSITION:
-- {position.side.value} @ {position.entry_price:.2f} | Leverage: {position.leverage}x
-- PnL: {pnl_pct:.3f}% (leveraged: {pnl_pct * position.leverage:.2f}%)
-- SL: {position.stop_loss:.2f} | TP: {position.take_profit:.2f}
-
-Should I HOLD or CLOSE?"""
+            prompt += f"\nPOS:{position.side.value} @{position.entry_price:.2f} {position.leverage}x PnL:{pnl_pct:.3f}%({pnl_pct*position.leverage:.1f}%lev) SL:{position.stop_loss:.2f} TP:{position.take_profit:.2f}"
 
         if recent_trades:
             last3 = recent_trades[-3:]
-            trades_info = [f"  {t.side.value}: {t.pnl:+.2f} USDT ({t.reason})" for t in last3]
-            prompt += f"\n\nLAST TRADES:\n" + "\n".join(trades_info)
+            t_info = " ".join([f"{t.side.value[0]}:{t.pnl:+.2f}" for t in last3])
+            wins = sum(1 for t in recent_trades if t.pnl > 0)
+            prompt += f"\nTRADES:{t_info} W:{wins}/{len(recent_trades)}"
 
         if market_context:
-            prompt += f"""
+            fund_dir = "L>" if market_context.funding_rate > 0 else "S>"
+            prompt += f"\nFUND:{market_context.funding_rate:.6f}({fund_dir}) OI:{market_context.open_interest_change:+.1f}% "
+            prompt += f"BOOK:{market_context.book_imbalance:+.0f}% BID:{market_context.bid_wall_price:.1f}({market_context.bid_wall_size:.0f}) ASK:{market_context.ask_wall_price:.1f}({market_context.ask_wall_size:.0f})\n"
+            prompt += f"HTF 5m:{market_context.trend_5m}(R{market_context.rsi_5m:.0f}) 15m:{market_context.trend_15m}(R{market_context.rsi_15m:.0f}) 1h:{market_context.trend_1h}(R{market_context.rsi_1h:.0f})\n"
+            prompt += f"SESS:{market_context.trading_session} FG:{market_context.fear_greed_index}"
 
-MARKET CONTEXT:
-- Funding: {market_context.funding_rate:.6f} ({'longs pay' if market_context.funding_rate > 0 else 'shorts pay'})
-- OI Change: {market_context.open_interest_change:+.2f}%
-- Book Imbalance: {market_context.book_imbalance:+.1f}% ({'buyers dominate' if market_context.book_imbalance > 10 else 'sellers dominate' if market_context.book_imbalance < -10 else 'balanced'})
-- Bid Wall: {market_context.bid_wall_price:.2f} ({market_context.bid_wall_size:.0f}) | Ask Wall: {market_context.ask_wall_price:.2f} ({market_context.ask_wall_size:.0f})
-
-HIGHER TIMEFRAME TRENDS (context only — YOU decide if they matter or not):
-- 5min:  {market_context.trend_5m} (RSI {market_context.rsi_5m:.0f})
-- 15min: {market_context.trend_15m} (RSI {market_context.rsi_15m:.0f})
-- 1hour: {market_context.trend_1h} (RSI {market_context.rsi_1h:.0f})
-NOTE: Short-term momentum can override higher TF. Reversals START on lower timeframes. Trust your read.
-
-Session: {market_context.trading_session} | Fear&Greed: {market_context.fear_greed_index} ({market_context.fear_greed_label})"""
-
-        prompt += f"""
-
-ACCOUNT: ${balance:.2f} — THIS IS ALL YOU HAVE. YOU ARE RUNNING OUT OF TIME.
-Target: $500+. Days remaining: ~3. {'YOU ARE LOSING MONEY — FIGHT HARDER OR DIE!' if performance_score < 0.8 else 'NOT ENOUGH — GO BIGGER!' if performance_score < 1.2 else 'MOMENTUM — PUSH PUSH PUSH!'}"""
-
-        if recent_trades:
-            wins = sum(1 for t in recent_trades if t.pnl > 0)
-            prompt += f"\nRecent: {wins}/{len(recent_trades)} wins"
-
-        prompt += "\n\nYou are DYING. The clock is ticking. Find a trade and TAKE IT. Only WAIT if there is literally ZERO movement. Respond with JSON only."
+        prompt += f"\nBAL:${balance:.2f} TGT:$500 PERF:{performance_score:.2f}"
 
         return prompt
 
@@ -293,18 +258,21 @@ Target: $500+. Days remaining: ~3. {'YOU ARE LOSING MONEY — FIGHT HARDER OR DI
             signal.confidence = confidence
             signal.strength = SignalStrength.NEUTRAL
 
-        signal.reasons = [f"AI: {reasoning}"] + [f"• {r}" for r in reasons]
+        grade = analysis.get("grade", "B")
+        rr = analysis.get("rr", 0)
+        signal.reasons = [f"AI[{grade}] RR:{rr:.1f}: {reasoning}"] + [f"• {r}" for r in reasons]
 
         # Store AI parameters — no limits, AI decides
         signal._ai_leverage = int(analysis.get("leverage", 5))
         signal._ai_position_size_pct = float(analysis.get("position_size_pct", 10)) / 100.0
         signal._ai_stop_loss_pct = float(analysis.get("stop_loss_pct", 0.5))
         signal._ai_take_profit_pct = float(analysis.get("take_profit_pct", 1.0))
+        signal._ai_trailing_stop_pct = float(analysis.get("trailing_stop_pct", 0))
         signal._ai_risk_level = analysis.get("risk_level", "MEDIUM")
-        signal._ai_urgency = analysis.get("urgency", "LOW")
+        signal._ai_grade = grade
 
-        signal.reasons.append(f"Leverage: {signal._ai_leverage}x | SL: {signal._ai_stop_loss_pct}% | TP: {signal._ai_take_profit_pct}%")
-        signal.reasons.append(f"Size: {signal._ai_position_size_pct*100:.0f}% of balance")
+        signal.reasons.append(f"Lev:{signal._ai_leverage}x SL:{signal._ai_stop_loss_pct}% TP:{signal._ai_take_profit_pct}%")
+        signal.reasons.append(f"Size:{signal._ai_position_size_pct*100:.0f}% Grade:{grade}")
 
         return signal
 
@@ -322,20 +290,21 @@ Target: $500+. Days remaining: ~3. {'YOU ARE LOSING MONEY — FIGHT HARDER OR DI
             return False, ""
 
         decision = analysis.get("decision", "WAIT").upper().strip()
+        iv_codes = analysis.get("invalidation_codes", [])
+        rc_codes = analysis.get("reason_codes", [])
+        reason_str = ",".join(iv_codes or rc_codes or ["AI"])
 
         # If AI explicitly says CLOSE — respect it immediately
         if decision == "CLOSE":
-            return True, f"AI close: {analysis.get('reasoning', 'close requested')}"
+            return True, f"AI close: {reason_str}"
 
         # If AI says opposite direction, close
         if position.side == Side.LONG and decision == "SHORT":
-            return True, f"AI reversal: {analysis.get('reasoning', 'trend change')}"
+            return True, f"AI reversal->SHORT: {reason_str}"
         if position.side == Side.SHORT and decision == "LONG":
-            return True, f"AI reversal: {analysis.get('reasoning', 'trend change')}"
+            return True, f"AI reversal->LONG: {reason_str}"
 
         # WAIT = hold current position, let SL/TP/trailing handle it
-        # Only CLOSE and reversal trigger exit
-
         return False, ""
 
     async def close(self):

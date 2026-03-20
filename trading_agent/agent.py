@@ -379,30 +379,23 @@ class TradingAgent:
 
         # Store AI state for dashboard
         self.ai_reasoning = analysis.get("reasoning", "")
-        self.ai_risk_level = analysis.get("risk_level", "")
+        self.ai_risk_level = analysis.get("grade", "")
 
         # Convert AI analysis to signal
         ai_signal = self.ai_brain.get_signal_from_analysis(analysis, tech_signal)
 
-        # AI has FULL CONTROL - trust its decision
-        # Only log technical agreement/disagreement for info
+        # AI has FULL CONTROL - log technical agreement for info only
         if ai_signal.side and tech_signal.side:
             if ai_signal.side == tech_signal.side:
-                ai_signal.reasons.append(f"Technicals CONFIRM ({tech_signal.confidence:.0f}%)")
-                logger.info(f"AI decision: {ai_signal.side.value} | Technicals AGREE")
+                ai_signal.reasons.append(f"Tech CONFIRM({tech_signal.confidence:.0f}%)")
             else:
-                ai_signal.reasons.append(f"Technicals DISAGREE ({tech_signal.side.value} {tech_signal.confidence:.0f}%)")
-                logger.info(f"AI decision: {ai_signal.side.value} | Technicals disagree ({tech_signal.side.value})")
-        elif ai_signal.side:
-            ai_signal.reasons.append("Technicals neutral")
+                ai_signal.reasons.append(f"Tech DISAGREE({tech_signal.side.value} {tech_signal.confidence:.0f}%)")
 
         logger.info(
-            f"AI FULL CONTROL: {analysis.get('decision')} | "
-            f"Confidence: {analysis.get('confidence')}% | "
-            f"Leverage: {analysis.get('leverage')}x | "
-            f"Size: {analysis.get('position_size_pct')}% | "
-            f"SL: {analysis.get('stop_loss_pct')}% | "
-            f"TP: {analysis.get('take_profit_pct')}%"
+            f"AI: {analysis.get('decision')} G:{analysis.get('grade')} "
+            f"C:{analysis.get('confidence')}% Lev:{analysis.get('leverage')}x "
+            f"M:{analysis.get('position_size_pct')}% SL:{analysis.get('stop_loss_pct')}% "
+            f"TP:{analysis.get('take_profit_pct')}% RR:{analysis.get('rr',0):.1f}"
         )
 
         return ai_signal
@@ -576,7 +569,8 @@ class TradingAgent:
 
             # Update AI reasoning for dashboard
             if self.ai_brain.last_analysis:
-                self.ai_reasoning = self.ai_brain.last_analysis.get("reasoning", "")
+                rc = self.ai_brain.last_analysis.get("rc", [])
+                self.ai_reasoning = ",".join(rc) if rc else str(self.ai_brain.last_analysis.get("a", ""))
 
     async def _close_position(self, reason: str):
         """Close the current position."""
