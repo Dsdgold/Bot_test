@@ -63,7 +63,7 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "65"))
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "40"))
 
     # Minimum hold time in seconds — prevent closing trades too early
     min_hold_time: int = int(os.getenv("MIN_HOLD_TIME", "120"))
