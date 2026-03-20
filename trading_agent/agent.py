@@ -677,17 +677,13 @@ class TradingAgent:
                 self.market_context,
             )
             if ai_close:
-                # Profit >= $1 → close and bank it (grosz do grosza)
-                # Profit $0-$1 → too small, fee would eat it, let it run
-                # Loss → AI says close, respect it (cut losses)
-                if dollar_pnl >= 1.0:
-                    await self._close_position(f"AI profit take: ${dollar_pnl:.2f} | {ai_reason}")
-                    return
-                elif dollar_pnl < 0:
-                    await self._close_position(ai_reason)
-                    return
+                # Only hard rule: don't close for less than fee cost (~$0.07 at $60)
+                if 0 < dollar_pnl < 0.15:
+                    logger.info(f"AI wants close but profit ${dollar_pnl:.2f} < fee cost — holding")
                 else:
-                    logger.info(f"AI wants close but profit too small (${dollar_pnl:.2f}) — holding for more")
+                    close_reason = f"{ai_reason} | PnL:${dollar_pnl:+.2f}"
+                    await self._close_position(close_reason)
+                    return
 
             # Update AI reasoning for dashboard
             if self.ai_brain.last_analysis:
