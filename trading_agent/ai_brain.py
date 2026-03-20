@@ -329,9 +329,8 @@ Performance Score: {performance_score:.2f} {'(LOSING? Get it back NOW — next t
         if position.side == Side.SHORT and decision == "LONG":
             return True, f"AI reversal: {analysis.get('reasoning', 'trend change')}"
 
-        # If AI says WAIT — it wants out of current position
-        if decision == "WAIT":
-            return True, f"AI exit: {analysis.get('reasoning', 'no longer confident')}"
+        # WAIT = hold current position, let SL/TP/trailing handle it
+        # Only CLOSE and reversal trigger exit
 
         return False, ""
 
