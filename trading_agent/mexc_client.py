@@ -278,17 +278,23 @@ class MEXCClient:
         quantity: float,
         leverage: int,
         price: Optional[float] = None,
+        use_limit: bool = True,
     ) -> Optional[str]:
-        """Open a futures position. Returns order ID."""
+        """Open a futures position. Uses limit order by default to save fees."""
         # Side: 1=open long, 2=close short, 3=open short, 4=close long
         open_type = 1 if side == Side.LONG else 3
-        order_type = 5  # Market order
-        if price:
-            order_type = 1  # Limit order
+
+        if use_limit and price and price > 0:
+            order_type = 1  # Limit order (maker fee = lower)
+            order_price = price
+            logger.info(f"Using LIMIT order at {price:.2f} (lower fees)")
+        else:
+            order_type = 5  # Market order
+            order_price = 0
 
         params = {
             "symbol": symbol,
-            "price": price or 0,
+            "price": order_price,
             "vol": quantity,
             "side": open_type,
             "type": order_type,
@@ -302,8 +308,21 @@ class MEXCClient:
 
         if data.get("success") and data.get("data"):
             order_id = str(data["data"])
-            logger.info(f"Order placed: {order_id} ({side.value} {quantity} {symbol})")
+            logger.info(f"Order placed: {order_id} ({side.value} {quantity} {symbol} {'LIMIT' if order_type == 1 else 'MARKET'})")
             return order_id
+
+        # Fallback to market order if limit fails
+        if use_limit and order_type == 1:
+            logger.warning("Limit order failed, falling back to market order")
+            params["type"] = 5
+            params["price"] = 0
+            data = await self._request(
+                "POST", "/api/v1/private/order/submit", params, signed=True
+            )
+            if data.get("success") and data.get("data"):
+                order_id = str(data["data"])
+                logger.info(f"Market fallback order placed: {order_id}")
+                return order_id
 
         logger.error(f"Failed to open position: {data}")
         return None
@@ -314,7 +333,7 @@ class MEXCClient:
         side: Side,
         quantity: float,
     ) -> Optional[str]:
-        """Close a futures position. Returns order ID."""
+        """Close a futures position with market order."""
         # 2=close short (close a long), 4=close long (close a short)
         close_type = 4 if side == Side.LONG else 2
 
@@ -323,7 +342,7 @@ class MEXCClient:
             "price": 0,
             "vol": quantity,
             "side": close_type,
-            "type": 5,  # Market order
+            "type": 5,  # Market order for closes (speed matters)
             "openType": 2,
         }
 
@@ -337,6 +356,36 @@ class MEXCClient:
             return order_id
 
         logger.error(f"Failed to close position: {data}")
+        return None
+
+    async def close_position_partial(
+        self,
+        symbol: str,
+        side: Side,
+        quantity: float,
+    ) -> Optional[str]:
+        """Partially close a position."""
+        close_type = 4 if side == Side.LONG else 2
+
+        params = {
+            "symbol": symbol,
+            "price": 0,
+            "vol": quantity,
+            "side": close_type,
+            "type": 5,
+            "openType": 2,
+        }
+
+        data = await self._request(
+            "POST", "/api/v1/private/order/submit", params, signed=True
+        )
+
+        if data.get("success") and data.get("data"):
+            order_id = str(data["data"])
+            logger.info(f"Partial close order: {order_id} (qty: {quantity})")
+            return order_id
+
+        logger.error(f"Failed to partially close: {data}")
         return None
 
     async def get_open_positions(self, symbol: str) -> List[Dict]:

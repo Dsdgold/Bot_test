@@ -105,6 +105,8 @@ class Position:
     open_time: datetime = field(default_factory=datetime.now)
     unrealized_pnl: float = 0.0
     order_id: str = ""
+    original_quantity: float = 0.0  # Track original qty for partial close
+    partial_closed: bool = False  # Whether 50% was already closed
 
     @property
     def value_usdt(self) -> float:
@@ -155,6 +157,9 @@ class MarketContext:
     # Session info
     trading_session: str = "OFF_HOURS"  # ASIA/EUROPE/US/OFF_HOURS
     session_volume_ratio: float = 1.0  # current vs average
+    # Fear & Greed
+    fear_greed_index: int = 50  # 0=Extreme Fear, 100=Extreme Greed
+    fear_greed_label: str = "Neutral"
 
 
 @dataclass

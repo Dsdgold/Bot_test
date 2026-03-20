@@ -60,10 +60,6 @@ async function stopAgent() {
 async function saveSettings() {
     const config = {
         symbol: document.getElementById('cfg-symbol').value,
-        leverage: parseInt(document.getElementById('cfg-leverage').value),
-        stop_loss_pct: parseFloat(document.getElementById('cfg-sl').value),
-        take_profit_pct: parseFloat(document.getElementById('cfg-tp').value),
-        min_confidence: parseFloat(document.getElementById('cfg-confidence').value),
         paper_trading: document.getElementById('cfg-mode').value === 'true',
     };
 
@@ -197,6 +193,36 @@ function updateDashboard(data) {
         wr.textContent = `${acc.win_rate}%`;
         wr.className = `stat-value ${acc.win_rate >= 50 ? 'positive' : acc.win_rate > 0 ? 'negative' : 'neutral'}`;
         document.getElementById('stat-wl').textContent = `W: ${acc.win_trades} / L: ${acc.loss_trades}`;
+    }
+
+    // Market Context
+    if (data.market_context) {
+        const ctx = data.market_context;
+        document.getElementById('market-context-row').style.display = '';
+
+        const trendColor = (t) => t === 'UP' ? 'positive' : t === 'DOWN' ? 'negative' : 'neutral';
+        const trendsEl = document.getElementById('ctx-trends');
+        trendsEl.innerHTML = `<span class="${trendColor(ctx.trend_5m)}">${ctx.trend_5m}</span> / <span class="${trendColor(ctx.trend_15m)}">${ctx.trend_15m}</span> / <span class="${trendColor(ctx.trend_1h)}">${ctx.trend_1h}</span>`;
+
+        const fundingEl = document.getElementById('ctx-funding');
+        fundingEl.textContent = (ctx.funding_rate * 100).toFixed(4) + '%';
+        fundingEl.className = `stat-value ${ctx.funding_rate > 0 ? 'negative' : ctx.funding_rate < 0 ? 'positive' : 'neutral'}`;
+
+        const bookEl = document.getElementById('ctx-book');
+        bookEl.textContent = `${ctx.book_imbalance > 0 ? '+' : ''}${ctx.book_imbalance}%`;
+        bookEl.className = `stat-value ${ctx.book_imbalance > 5 ? 'positive' : ctx.book_imbalance < -5 ? 'negative' : 'neutral'}`;
+
+        const fgEl = document.getElementById('ctx-fg');
+        const fgVal = ctx.fear_greed_index || 50;
+        fgEl.textContent = `${fgVal}`;
+        fgEl.className = `stat-value ${fgVal < 25 ? 'negative' : fgVal > 75 ? 'positive' : 'neutral'}`;
+
+        document.getElementById('ctx-session').textContent = ctx.trading_session || '--';
+
+        const perfEl = document.getElementById('ctx-perf');
+        const perf = data.performance_score || 1.0;
+        perfEl.textContent = perf.toFixed(2);
+        perfEl.className = `stat-value ${perf > 1.1 ? 'positive' : perf < 0.8 ? 'negative' : 'neutral'}`;
     }
 
     // Signal

@@ -64,6 +64,11 @@ class TradingAgent:
         self.market_context = MarketContext()
         self.prev_open_interest: float = 0.0
 
+        # Auto-tuning state
+        self.performance_score: float = 1.0  # Multiplier 0.5-1.5
+        self.best_session: str = "US"  # Best performing session
+        self.best_hour_win_rate: dict = {}  # Hour -> win rate
+
     async def start(self):
         """Start the trading agent."""
         logger.info("=" * 60)
@@ -244,16 +249,84 @@ class TradingAgent:
             else:
                 self.market_context.trading_session = "OFF_HOURS"
 
+            # Fetch Fear & Greed Index
+            try:
+                fg_resp = await self.client.client.get(
+                    "https://api.alternative.me/fng/?limit=1", timeout=5.0
+                )
+                fg_data = fg_resp.json()
+                if fg_data.get("data"):
+                    self.market_context.fear_greed_index = int(fg_data["data"][0].get("value", 50))
+                    self.market_context.fear_greed_label = fg_data["data"][0].get("value_classification", "Neutral")
+            except Exception:
+                pass  # Non-critical
+
+            # Auto-tune based on performance
+            self._auto_tune()
+
             logger.info(
                 f"Market context: funding={self.market_context.funding_rate:.6f} | "
                 f"OI change={self.market_context.open_interest_change:+.2f}% | "
                 f"book={self.market_context.book_imbalance:+.1f}% | "
                 f"trends: 5m={self.market_context.trend_5m} 15m={self.market_context.trend_15m} "
-                f"1h={self.market_context.trend_1h} | session={self.market_context.trading_session}"
+                f"1h={self.market_context.trend_1h} | session={self.market_context.trading_session} | "
+                f"F&G={self.market_context.fear_greed_index} ({self.market_context.fear_greed_label}) | "
+                f"perf_score={self.performance_score:.2f}"
             )
 
         except Exception as e:
             logger.error(f"Market context update failed: {e}")
+
+    def _auto_tune(self):
+        """Analyze past trades and adjust performance score."""
+        if len(self.trades) < 3:
+            return
+
+        # Analyze last 10 trades
+        recent = self.trades[-10:]
+        wins = sum(1 for t in recent if t.pnl > 0)
+        losses = len(recent) - wins
+        recent_win_rate = wins / len(recent) if recent else 0.5
+
+        # Performance score: 0.5 (bad streak) to 1.5 (hot streak)
+        if recent_win_rate >= 0.7:
+            self.performance_score = min(1.5, self.performance_score + 0.1)
+        elif recent_win_rate <= 0.3:
+            self.performance_score = max(0.5, self.performance_score - 0.15)
+        else:
+            # Slowly return to 1.0
+            self.performance_score += (1.0 - self.performance_score) * 0.1
+
+        # Track best performing hours
+        for t in recent:
+            hour = t.entry_time.hour
+            if hour not in self.best_hour_win_rate:
+                self.best_hour_win_rate[hour] = {"wins": 0, "total": 0}
+            self.best_hour_win_rate[hour]["total"] += 1
+            if t.pnl > 0:
+                self.best_hour_win_rate[hour]["wins"] += 1
+
+        # Adjust session quality
+        avg_pnl_by_session = {}
+        for t in self.trades:
+            hour = t.entry_time.hour
+            if 0 <= hour < 8:
+                sess = "ASIA"
+            elif 8 <= hour < 14:
+                sess = "EUROPE"
+            elif 14 <= hour < 21:
+                sess = "US"
+            else:
+                sess = "OFF_HOURS"
+            if sess not in avg_pnl_by_session:
+                avg_pnl_by_session[sess] = []
+            avg_pnl_by_session[sess].append(t.pnl)
+
+        if avg_pnl_by_session:
+            self.best_session = max(
+                avg_pnl_by_session,
+                key=lambda s: sum(avg_pnl_by_session[s]) / len(avg_pnl_by_session[s])
+            )
 
     @staticmethod
     def _simple_ema(data: list, period: int) -> float:
@@ -303,6 +376,8 @@ class TradingAgent:
             recent_trades=self.trades[-5:] if self.trades else [],
             balance=self.account.balance,
             market_context=self.market_context,
+            performance_score=self.performance_score,
+            best_session=self.best_session,
         )
 
         if not analysis:
@@ -434,13 +509,18 @@ class TradingAgent:
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 order_id=f"paper_{int(datetime.now().timestamp())}",
+                original_quantity=quantity,
             )
         else:
+            # Use limit order at current price for lower fees
+            limit_price = self.ticker.bid if signal.side == Side.LONG else self.ticker.ask
             order_id = await self.client.open_position(
                 self.config.trading.symbol,
                 signal.side,
                 quantity,
                 ai_leverage,
+                price=limit_price,
+                use_limit=True,
             )
             if order_id:
                 self.position = Position(
@@ -452,6 +532,7 @@ class TradingAgent:
                     stop_loss=stop_loss,
                     take_profit=take_profit,
                     order_id=order_id,
+                    original_quantity=quantity,
                 )
 
     async def _monitor_position(self, tech_signal: Signal):
@@ -472,6 +553,29 @@ class TradingAgent:
             raw_pnl = (self.position.entry_price - current_price) * self.position.quantity
 
         self.position.unrealized_pnl = raw_pnl * self.position.leverage
+        leveraged_pnl_pct = (raw_pnl / self.position.entry_price) * 100 * self.position.leverage
+
+        # Partial close: close 50% at first TP level, let rest ride with trailing
+        if not self.position.partial_closed and leveraged_pnl_pct >= 1.5:
+            half_qty = round(self.position.original_quantity * 0.5, 6)
+            if half_qty > 0:
+                logger.info(
+                    f"PARTIAL CLOSE: Taking 50% profit at {leveraged_pnl_pct:.2f}% "
+                    f"(closing {half_qty} of {self.position.quantity})"
+                )
+                if not self.config.paper_trading:
+                    await self.client.close_position_partial(
+                        self.position.symbol, self.position.side, half_qty
+                    )
+                self.position.quantity = round(self.position.quantity - half_qty, 6)
+                self.position.partial_closed = True
+                # Move SL to break-even after partial close
+                self.position.stop_loss = self.position.entry_price
+                logger.info(f"SL moved to break-even: {self.position.stop_loss:.2f}")
+                if self.config.paper_trading:
+                    # Record partial profit for paper trading
+                    partial_pnl = raw_pnl * self.position.leverage * 0.5
+                    self.paper_balance += partial_pnl
 
         # Check technical SL/TP and trailing stop
         should_close, reason = self.risk_manager.should_close_position(
@@ -572,7 +676,10 @@ class TradingAgent:
                 "trend_15m": self.market_context.trend_15m,
                 "trend_1h": self.market_context.trend_1h,
                 "trading_session": self.market_context.trading_session,
+                "fear_greed_index": self.market_context.fear_greed_index,
+                "fear_greed_label": self.market_context.fear_greed_label,
             },
+            "performance_score": round(self.performance_score, 2),
             "account": {
                 "balance": round(self.account.balance, 2),
                 "available": round(self.account.available, 2),

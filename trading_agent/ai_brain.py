@@ -86,13 +86,18 @@ class ClaudeAIBrain:
         recent_trades: list = None,
         balance: float = 0,
         market_context: Optional[MarketContext] = None,
+        performance_score: float = 1.0,
+        best_session: str = "US",
     ) -> Optional[dict]:
         """Send market data to Claude for analysis."""
         if not self.enabled:
             return None
 
         try:
-            prompt = self._build_prompt(candles, indicators, position, recent_trades, balance, market_context)
+            prompt = self._build_prompt(
+                candles, indicators, position, recent_trades, balance,
+                market_context, performance_score, best_session
+            )
 
             resp = await self.client.post(
                 self.api_url,
@@ -153,6 +158,8 @@ class ClaudeAIBrain:
         recent_trades: list,
         balance: float,
         market_context: Optional[MarketContext] = None,
+        performance_score: float = 1.0,
+        best_session: str = "US",
     ) -> str:
         """Build the analysis prompt with all market data."""
         # Recent price action (last 20 candles)
@@ -258,9 +265,29 @@ TRADING SESSION: {market_context.trading_session}
 - ASIA (00-08 UTC): moderate volatility
 - EUROPE (08-14 UTC): increasing volatility
 - US (14-21 UTC): highest volatility, best for scalping
-- OFF_HOURS (21-00 UTC): low volatility, avoid large positions"""
+- OFF_HOURS (21-00 UTC): low volatility, avoid large positions
+
+FEAR & GREED INDEX: {market_context.fear_greed_index}/100 ({market_context.fear_greed_label})
+- 0-25 = Extreme Fear → contrarian BUY signal (market oversold)
+- 25-45 = Fear → cautious buying opportunity
+- 45-55 = Neutral
+- 55-75 = Greed → reduce position sizes, tighter SL
+- 75-100 = Extreme Greed → contrarian SELL signal (market overbought)"""
 
         prompt += f"\n\nACCOUNT BALANCE: ${balance:.2f}"
+
+        # Auto-tuning data
+        prompt += f"""
+
+PERFORMANCE AUTO-TUNE:
+- Performance Score: {performance_score:.2f} (0.5=cold streak, 1.0=normal, 1.5=hot streak)
+- Best Session: {best_session}
+- RULE: If score < 0.7, reduce leverage and position size. If score > 1.2, you can be slightly more aggressive."""
+
+        if recent_trades:
+            wins = sum(1 for t in recent_trades if t.pnl > 0)
+            prompt += f"\n- Recent win rate: {wins}/{len(recent_trades)} ({wins/len(recent_trades)*100:.0f}%)"
+
         prompt += "\n\nYou have FULL CONTROL. Decide: direction, leverage, position size %, stop-loss %, take-profit %. Respond ONLY with JSON."
 
         return prompt

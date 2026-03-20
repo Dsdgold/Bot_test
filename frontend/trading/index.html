@@ -86,6 +86,34 @@
         </div>
     </div>
 
+    <!-- Market Context Row -->
+    <div class="stats-row" id="market-context-row" style="display: none;">
+        <div class="stat-card" style="border-left: 2px solid var(--purple);">
+            <div class="stat-label">Trend 5m/15m/1h</div>
+            <div id="ctx-trends" class="stat-value" style="font-size: 14px;">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Funding Rate</div>
+            <div id="ctx-funding" class="stat-value" style="font-size: 14px;">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Book Imbalance</div>
+            <div id="ctx-book" class="stat-value" style="font-size: 14px;">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Fear & Greed</div>
+            <div id="ctx-fg" class="stat-value" style="font-size: 14px;">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Session</div>
+            <div id="ctx-session" class="stat-value" style="font-size: 14px;">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Perf Score</div>
+            <div id="ctx-perf" class="stat-value" style="font-size: 14px;">1.00</div>
+        </div>
+    </div>
+
     <!-- AI Reasoning Card -->
     <div id="ai-reasoning-card" class="position-card active" style="display: block; border-left: 3px solid var(--purple);">
         <div class="position-header">
@@ -228,27 +256,17 @@
             </select>
         </div>
         <div class="form-group">
-            <label>Leverage</label>
-            <input type="number" id="cfg-leverage" min="1" max="50" value="20">
-        </div>
-        <div class="form-group">
-            <label>Stop Loss %</label>
-            <input type="number" id="cfg-sl" step="0.1" min="0.1" max="10" value="1.5">
-        </div>
-        <div class="form-group">
-            <label>Take Profit %</label>
-            <input type="number" id="cfg-tp" step="0.1" min="0.1" max="20" value="3.0">
-        </div>
-        <div class="form-group">
-            <label>Min Confidence %</label>
-            <input type="number" id="cfg-confidence" step="1" min="30" max="95" value="65">
-        </div>
-        <div class="form-group">
             <label>Mode</label>
             <select id="cfg-mode">
                 <option value="true">Paper Trading</option>
                 <option value="false">Live Trading</option>
             </select>
+        </div>
+        <div style="padding: 10px; background: rgba(124,77,255,0.08); border: 1px solid rgba(124,77,255,0.2); border-radius: var(--radius); margin-top: 8px;">
+            <div style="font-size: 11px; color: var(--purple);">
+                Claude AI controls: leverage, stop-loss, take-profit, position size, entry/exit timing.
+                All decisions are made automatically based on market analysis.
+            </div>
         </div>
         <div class="modal-actions">
             <button class="btn btn-start" onclick="saveSettings()">Save</button>
