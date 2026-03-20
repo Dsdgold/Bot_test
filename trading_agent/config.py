@@ -41,7 +41,7 @@ class TradingConfig:
     # Scalping timing
     candle_interval: str = "Min1"  # 1-minute candles for scalping
     analysis_interval: int = 5  # Analyze every 5 seconds
-    cooldown_after_trade: int = 30  # Wait 30s after closing a trade
+    cooldown_after_trade: int = 5  # Wait 5s after closing a trade
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
@@ -58,7 +58,7 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "65"))
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "20"))
 
 
 @dataclass

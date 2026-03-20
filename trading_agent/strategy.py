@@ -164,9 +164,9 @@ class ScalpingStrategy:
             confidence = min((long_score / max_possible) * 100, 100)
             signal.side = Side.LONG
             signal.confidence = confidence
-            if confidence >= 75:
+            if confidence >= 50:
                 signal.strength = SignalStrength.STRONG_BUY
-            elif confidence >= 50:
+            elif confidence >= 20:
                 signal.strength = SignalStrength.BUY
             else:
                 signal.strength = SignalStrength.NEUTRAL
@@ -175,9 +175,9 @@ class ScalpingStrategy:
             confidence = min((short_score / max_possible) * 100, 100)
             signal.side = Side.SHORT
             signal.confidence = confidence
-            if confidence >= 75:
+            if confidence >= 50:
                 signal.strength = SignalStrength.STRONG_SELL
-            elif confidence >= 50:
+            elif confidence >= 20:
                 signal.strength = SignalStrength.SELL
             else:
                 signal.strength = SignalStrength.NEUTRAL
