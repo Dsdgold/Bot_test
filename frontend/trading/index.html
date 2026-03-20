@@ -13,6 +13,7 @@
 <header class="header">
     <div class="header-left">
         <div class="logo">AI TRADING AGENT</div>
+        <span id="ai-badge" class="mode-badge" style="background: rgba(124,77,255,0.15); color: #7c4dff;">AI OFF</span>
         <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
         <span id="symbol-display" style="font-family: var(--mono); font-size: 14px; font-weight: 600;">BTC_USDT</span>
     </div>
@@ -44,6 +45,10 @@
     <div class="status-item">
         <span class="status-label">Leverage:</span>
         <span id="leverage-display" class="status-value">20x</span>
+    </div>
+    <div class="status-item">
+        <span class="status-label">AI Analyses:</span>
+        <span id="ai-count-display" class="status-value" style="color: var(--purple);">0</span>
     </div>
 </div>
 
@@ -78,6 +83,17 @@
         <div class="stat-card">
             <div class="stat-label">RSI</div>
             <div id="stat-rsi" class="stat-value">50.0</div>
+        </div>
+    </div>
+
+    <!-- AI Reasoning Card -->
+    <div id="ai-reasoning-card" class="position-card active" style="display: block; border-left: 3px solid var(--purple);">
+        <div class="position-header">
+            <span class="panel-title" style="border: none; padding: 0; margin: 0; color: var(--purple);">Claude AI Analysis</span>
+            <span id="ai-risk-badge" class="position-side" style="background: rgba(124,77,255,0.15); color: var(--purple);">--</span>
+        </div>
+        <div id="ai-reasoning-text" style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; padding: 8px 0;">
+            Configure your Anthropic API key in Settings to enable Claude AI analysis.
         </div>
     </div>
 
@@ -180,6 +196,24 @@
 <div id="settings-modal" class="modal-overlay">
     <div class="modal">
         <h2>Agent Settings</h2>
+
+        <div style="padding: 12px; background: rgba(124,77,255,0.1); border: 1px solid rgba(124,77,255,0.3); border-radius: var(--radius); margin-bottom: 16px;">
+            <div style="font-size: 12px; font-weight: 600; color: var(--purple); margin-bottom: 8px;">API Keys (stored in memory only)</div>
+
+            <div class="form-group">
+                <label>Anthropic API Key (Claude AI)</label>
+                <input type="password" id="cfg-anthropic-key" placeholder="sk-ant-...">
+            </div>
+            <div class="form-group">
+                <label>MEXC API Key</label>
+                <input type="password" id="cfg-mexc-key" placeholder="mx0v...">
+            </div>
+            <div class="form-group">
+                <label>MEXC API Secret</label>
+                <input type="password" id="cfg-mexc-secret" placeholder="Your MEXC secret...">
+            </div>
+        </div>
+
         <div class="form-group">
             <label>Symbol</label>
             <select id="cfg-symbol">

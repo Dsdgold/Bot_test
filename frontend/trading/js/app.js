@@ -67,12 +67,38 @@ async function saveSettings() {
         paper_trading: document.getElementById('cfg-mode').value === 'true',
     };
 
+    // API keys - only send if user entered them
+    const anthropicKey = document.getElementById('cfg-anthropic-key').value.trim();
+    const mexcKey = document.getElementById('cfg-mexc-key').value.trim();
+    const mexcSecret = document.getElementById('cfg-mexc-secret').value.trim();
+
+    if (anthropicKey) config.anthropic_api_key = anthropicKey;
+    if (mexcKey) config.mexc_api_key = mexcKey;
+    if (mexcSecret) config.mexc_api_secret = mexcSecret;
+
     try {
-        await fetch(`${API}/api/config`, {
+        const resp = await fetch(`${API}/api/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config),
         });
+        const result = await resp.json();
+
+        // Clear password fields after saving
+        document.getElementById('cfg-anthropic-key').value = '';
+        document.getElementById('cfg-mexc-key').value = '';
+        document.getElementById('cfg-mexc-secret').value = '';
+
+        // Show confirmation
+        if (result.config) {
+            const aiBadge = document.getElementById('ai-badge');
+            if (result.config.ai_enabled) {
+                aiBadge.textContent = 'AI ON';
+                aiBadge.style.background = 'rgba(0, 200, 83, 0.15)';
+                aiBadge.style.color = '#00c853';
+            }
+        }
+
         closeSettings();
     } catch (e) {
         console.error('Config error:', e);
@@ -100,6 +126,47 @@ function updateDashboard(data) {
     const modeBadge = document.getElementById('mode-badge');
     modeBadge.textContent = data.mode || 'PAPER';
     modeBadge.className = `mode-badge ${data.mode === 'LIVE' ? 'mode-live' : 'mode-paper'}`;
+
+    // AI badge
+    const aiBadge = document.getElementById('ai-badge');
+    if (data.ai_enabled) {
+        aiBadge.textContent = 'AI ON';
+        aiBadge.style.background = 'rgba(0, 200, 83, 0.15)';
+        aiBadge.style.color = '#00c853';
+    } else {
+        aiBadge.textContent = 'AI OFF';
+        aiBadge.style.background = 'rgba(124,77,255,0.15)';
+        aiBadge.style.color = '#7c4dff';
+    }
+
+    // AI analysis count
+    document.getElementById('ai-count-display').textContent = data.ai_analysis_count || 0;
+
+    // AI Reasoning Card
+    const aiReasonText = document.getElementById('ai-reasoning-text');
+    const aiRiskBadge = document.getElementById('ai-risk-badge');
+    if (data.ai_reasoning) {
+        aiReasonText.textContent = data.ai_reasoning;
+        aiReasonText.style.color = 'var(--text-primary)';
+    } else if (data.ai_enabled) {
+        aiReasonText.textContent = 'Claude AI is active. Waiting for next analysis cycle...';
+        aiReasonText.style.color = 'var(--text-secondary)';
+    } else {
+        aiReasonText.textContent = 'Configure your Anthropic API key in Settings to enable Claude AI analysis.';
+        aiReasonText.style.color = 'var(--text-muted)';
+    }
+
+    if (data.ai_risk_level) {
+        aiRiskBadge.textContent = data.ai_risk_level;
+        const riskColors = {
+            'LOW': { bg: 'rgba(0,200,83,0.15)', color: '#00c853' },
+            'MEDIUM': { bg: 'rgba(255,214,0,0.15)', color: '#ffd600' },
+            'HIGH': { bg: 'rgba(255,23,68,0.15)', color: '#ff1744' },
+        };
+        const rc = riskColors[data.ai_risk_level] || riskColors['MEDIUM'];
+        aiRiskBadge.style.background = rc.bg;
+        aiRiskBadge.style.color = rc.color;
+    }
 
     // Ticker
     if (data.ticker) {
@@ -155,7 +222,12 @@ function updateDashboard(data) {
         // Reasons
         const list = document.getElementById('reasons-list');
         if (sig.reasons && sig.reasons.length > 0) {
-            list.innerHTML = sig.reasons.map(r => `<li>${escapeHtml(r)}</li>`).join('');
+            list.innerHTML = sig.reasons.map(r => {
+                // Highlight AI reasons
+                const isAI = r.startsWith('AI:') || r.startsWith('Technical');
+                const style = isAI ? 'color: var(--purple); font-weight: 500;' : '';
+                return `<li style="${style}">${escapeHtml(r)}</li>`;
+            }).join('');
         }
     }
 
@@ -278,9 +350,8 @@ function drawChart(position, indicators) {
         ctx.fillText(formatPrice(price), W - padding.right + 5, y + 4);
     }
 
-    // Bollinger Bands (fill area)
+    // Bollinger Bands
     if (indicators && indicators.bb_upper && indicators.bb_lower) {
-        // We'd need per-candle BB for proper fill, so just draw current levels as lines
         const bbUp = toY(indicators.bb_upper);
         const bbMid = toY(indicators.bb_middle);
         const bbLow = toY(indicators.bb_lower);
@@ -295,6 +366,10 @@ function drawChart(position, indicators) {
             ctx.stroke();
         });
         ctx.setLineDash([]);
+
+        // BB fill
+        ctx.fillStyle = 'rgba(124, 77, 255, 0.05)';
+        ctx.fillRect(padding.left, bbUp, chartW, bbLow - bbUp);
     }
 
     // VWAP line
@@ -335,12 +410,35 @@ function drawChart(position, indicators) {
 
     // Position lines
     if (position) {
-        // Entry
         drawHLine(ctx, toY(position.entry_price), padding.left, W - padding.right, '#4285f4', 'Entry: ' + formatPrice(position.entry_price));
-        // SL
         drawHLine(ctx, toY(position.stop_loss), padding.left, W - padding.right, '#ff1744', 'SL: ' + formatPrice(position.stop_loss));
-        // TP
         drawHLine(ctx, toY(position.take_profit), padding.left, W - padding.right, '#00c853', 'TP: ' + formatPrice(position.take_profit));
+    }
+
+    // EMA lines (fast and slow)
+    if (indicators) {
+        if (indicators.ema_fast) {
+            const emaY = toY(indicators.ema_fast);
+            ctx.strokeStyle = 'rgba(0, 200, 83, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(padding.left, emaY);
+            ctx.lineTo(W - padding.right, emaY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        if (indicators.ema_slow) {
+            const emaY = toY(indicators.ema_slow);
+            ctx.strokeStyle = 'rgba(255, 23, 68, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(padding.left, emaY);
+            ctx.lineTo(W - padding.right, emaY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
     }
 
     // Current price line

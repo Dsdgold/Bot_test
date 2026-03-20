@@ -62,10 +62,22 @@ class TradingConfig:
 
 
 @dataclass
+class AIConfig:
+    """Claude AI configuration."""
+    api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    model: str = os.getenv("AI_MODEL", "claude-sonnet-4-20250514")
+    # How often to ask Claude (every N ticks, to save API calls)
+    analysis_every_n_ticks: int = int(os.getenv("AI_ANALYSIS_INTERVAL", "3"))
+    # Use AI for position close decisions too
+    ai_close_decisions: bool = os.getenv("AI_CLOSE_DECISIONS", "true").lower() == "true"
+
+
+@dataclass
 class AgentConfig:
     """Full agent configuration."""
     mexc: MEXCConfig = field(default_factory=MEXCConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
+    ai: AIConfig = field(default_factory=AIConfig)
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     paper_trading: bool = os.getenv("PAPER_TRADING", "true").lower() == "true"
     dashboard_port: int = int(os.getenv("DASHBOARD_PORT", "8001"))

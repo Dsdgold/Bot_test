@@ -73,6 +73,10 @@ async def get_state():
         "symbol": config.trading.symbol,
         "leverage": config.trading.leverage,
         "mode": "PAPER" if config.paper_trading else "LIVE",
+        "ai_enabled": bool(config.ai.api_key),
+        "ai_reasoning": "",
+        "ai_risk_level": "",
+        "ai_analysis_count": 0,
         "account": None,
         "ticker": None,
         "position": None,
@@ -131,6 +135,14 @@ async def update_config(data: dict):
     if "paper_trading" in data:
         config.paper_trading = bool(data["paper_trading"])
 
+    # API keys (set at runtime through dashboard)
+    if "anthropic_api_key" in data and data["anthropic_api_key"]:
+        config.ai.api_key = data["anthropic_api_key"]
+    if "mexc_api_key" in data and data["mexc_api_key"]:
+        config.mexc.api_key = data["mexc_api_key"]
+    if "mexc_api_secret" in data and data["mexc_api_secret"]:
+        config.mexc.api_secret = data["mexc_api_secret"]
+
     return {"status": "updated", "config": {
         "symbol": trading.symbol,
         "leverage": trading.leverage,
@@ -138,6 +150,8 @@ async def update_config(data: dict):
         "take_profit_pct": trading.take_profit_pct,
         "min_confidence": trading.min_confidence,
         "paper_trading": config.paper_trading,
+        "ai_enabled": bool(config.ai.api_key),
+        "mexc_configured": bool(config.mexc.api_key),
     }}
 
 
