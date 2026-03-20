@@ -28,25 +28,25 @@ class TradingConfig:
     # Symbol to trade (USDT perpetual futures)
     symbol: str = os.getenv("TRADING_SYMBOL", "BTCUSDT")
 
-    # Leverage settings
-    leverage: int = int(os.getenv("TRADING_LEVERAGE", "5"))
-    max_leverage: int = 10
+    # Leverage settings (defaults — AI overrides these)
+    leverage: int = int(os.getenv("TRADING_LEVERAGE", "10"))
+    max_leverage: int = 50
 
-    # Position sizing
-    max_position_pct: float = 0.15  # Max 15% of balance per position
+    # Position sizing (defaults — AI overrides)
+    max_position_pct: float = 0.30
     min_order_usdt: float = 5.0
 
-    # Risk management
-    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.5"))
-    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "1.0"))
-    trailing_stop_pct: float = 0.3
-    max_daily_loss_pct: float = 5.0  # Stop trading after 5% daily loss
+    # Risk management (defaults — AI overrides)
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "1.0"))
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "2.0"))
+    trailing_stop_pct: float = 0.5
+    max_daily_loss_pct: float = 15.0  # Safety net only
     max_open_positions: int = 1
 
     # Timing
-    candle_interval: str = "Min1"  # 1-minute candles
-    analysis_interval: int = 10  # Analyze every 10 seconds (less overtrading)
-    cooldown_after_trade: int = 60  # Wait 60s after closing a trade
+    candle_interval: str = "Min1"
+    analysis_interval: int = 5  # Every 5 seconds
+    cooldown_after_trade: int = 10  # 10s cooldown
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
