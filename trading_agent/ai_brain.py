@@ -38,6 +38,7 @@ Open if grade>=C. Only WAIT on grade D (dead market).
 <fields>a=action g=grade c=confidence(0-100) lev=leverage(15-50) m=margin_%_of_equity(60-95) sl=stop_loss_%_from_entry(0.3-2.0) tp=take_profit_%_from_entry(0.8-8.0) ts=trailing_stop_%_trigger rr=expected_rr rc=reason_codes iv=invalidation_codes</fields>
 <codes>HTF+,HTF-,BOS+,BOS-,RET,BRK,FAIL,MOM+,MOM-,LIQ+,LIQ-,CHOP,REV,EXH,RR+,RR-,FG+,FG-,VOL+,VOL-,SQZ,SCALP</codes>
 <special>WAIT only on grade D. Every other grade=TRADE. For CLOSE:iv=why. Be aggressive. Survive.</special>
+<critical>OUTPUT ONLY RAW JSON. No markdown. No explanation. No ```json. No text before or after. JUST the JSON object. Example: {"a":"L","g":"B","c":70,"lev":25,"m":80,"sl":0.5,"tp":2.0,"ts":0.8,"rr":3.0,"rc":["MOM+","BOS+"],"iv":[]}</critical>
 </system>"""
 
 
@@ -88,7 +89,7 @@ class ClaudeAIBrain:
                 },
                 json={
                     "model": self.model,
-                    "max_tokens": 512,
+                    "max_tokens": 300,
                     "system": SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -234,6 +235,7 @@ class ClaudeAIBrain:
             prompt += f"SESS:{market_context.trading_session} FG:{market_context.fear_greed_index}"
 
         prompt += f"\nBAL:${balance:.2f} TGT:$500 PERF:{performance_score:.2f}"
+        prompt += "\nJSON:"
 
         return prompt
 
