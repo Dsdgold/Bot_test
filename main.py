@@ -40,11 +40,17 @@ LOOP_INTERVAL_SEC = 60  # 1-minute candle cycle
 # Shared state for dashboard (module-level, thread-safe reads)
 # ---------------------------------------------------------------------------
 _shared_positions: list[dict] = []  # Updated by bot loop, read by dashboard
+_shared_equity: dict = {}  # Updated by bot loop, read by dashboard
 
 
 def get_shared_positions() -> list[dict]:
     """Return a snapshot of bot's internal positions for the dashboard."""
     return list(_shared_positions)
+
+
+def get_shared_equity() -> dict:
+    """Return bot's equity tracking for the dashboard."""
+    return dict(_shared_equity)
 
 
 def _sync_shared_positions(active_positions: dict, current_price: float = 0) -> None:
@@ -747,7 +753,19 @@ async def run_bot(dry_run: bool = False):
             if closed_ids and active_positions and not dry_run:
                 update_exchange_sl(active_positions)
 
-            # ── Log active positions status ──
+            # ── Sync shared state for dashboard ──
+            dd_pct_now = ((peak_equity - agent.equity) / peak_equity * 100) if peak_equity > 0 else 0
+            _shared_equity.update({
+                "equity": round(agent.equity, 2),
+                "peak_equity": round(peak_equity, 2),
+                "dd_pct": round(dd_pct_now, 2),
+                "daily_pnl": round(daily_pnl, 2),
+                "total_trades": wins + losses,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0,
+                "consecutive_losses": consecutive_losses,
+            })
             if active_positions:
                 _sync_shared_positions(active_positions, price)
             if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:

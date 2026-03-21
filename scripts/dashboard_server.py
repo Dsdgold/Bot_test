@@ -29,6 +29,37 @@ except ImportError:
 
 DB_PATH = config.DB_PATH
 
+
+def _bybit_signed_request(endpoint: str, params: dict | None = None) -> dict:
+    """Make authenticated Bybit v5 REST API call without pybit."""
+    import hashlib, hmac, time as _time, urllib.request, urllib.parse, json as _json
+
+    api_key = config.BYBIT_API_KEY
+    api_secret = config.BYBIT_API_SECRET
+    base = "https://api-testnet.bybit.com" if getattr(config, "BYBIT_TESTNET", False) else "https://api.bybit.com"
+
+    timestamp = str(int(_time.time() * 1000))
+    recv_window = "5000"
+    query_string = urllib.parse.urlencode(params) if params else ""
+
+    # Bybit v5 HMAC: timestamp + api_key + recv_window + query_string
+    pre_sign = f"{timestamp}{api_key}{recv_window}{query_string}"
+    signature = hmac.new(api_secret.encode(), pre_sign.encode(), hashlib.sha256).hexdigest()
+
+    url = f"{base}{endpoint}"
+    if query_string:
+        url += f"?{query_string}"
+
+    req = urllib.request.Request(url, headers={
+        "X-BAPI-API-KEY": api_key,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-SIGN": signature,
+        "X-BAPI-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return _json.loads(resp.read())
+
 # Import canonical schemas from the modules that own them
 from trading_agent.data_collector import (
     _TRADE_DECISIONS_SQL, _MARKET_SNAPSHOTS_SQL, _EQUITY_CURVE_SQL, _DAILY_SESSIONS_SQL,
@@ -70,7 +101,7 @@ def create_app() -> "FastAPI":
         """Live status for the monitor."""
         conn = get_conn()
         try:
-            # Equity
+            # Equity — DB first, then bot internal state fallback
             eq = conn.execute(
                 "SELECT * FROM equity_curve ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -78,6 +109,20 @@ def create_app() -> "FastAPI":
                 "equity_usdt": 0, "peak_equity": 0, "drawdown_pct": 0,
                 "total_trades": 0, "total_wins": 0, "win_rate": 0, "total_net_pnl": 0,
             }
+            # Overlay live bot equity if available (more up-to-date than DB)
+            try:
+                from main import get_shared_equity
+                bot_eq = get_shared_equity()
+                if bot_eq and bot_eq.get("equity", 0) > 0:
+                    equity_data["equity_usdt"] = bot_eq["equity"]
+                    equity_data["peak_equity"] = bot_eq.get("peak_equity", 0)
+                    equity_data["drawdown_pct"] = bot_eq.get("dd_pct", 0)
+                    equity_data["total_trades"] = bot_eq.get("total_trades", equity_data.get("total_trades", 0))
+                    equity_data["total_wins"] = bot_eq.get("wins", equity_data.get("total_wins", 0))
+                    equity_data["win_rate"] = bot_eq.get("win_rate", equity_data.get("win_rate", 0))
+                    equity_data["total_net_pnl"] = bot_eq.get("daily_pnl", equity_data.get("total_net_pnl", 0))
+            except Exception:
+                pass
 
             # Recent trades (today)
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -278,53 +323,49 @@ def create_app() -> "FastAPI":
 
     @app.get("/api/balance")
     async def balance():
-        """Fetch account balance from Bybit."""
-        if not config.BYBIT_API_KEY or not config.BYBIT_API_SECRET:
-            return {"equity": 0, "error": "API keys not configured in .env"}
-        try:
-            from pybit.unified_trading import HTTP
-            session = HTTP(
-                testnet=config.BYBIT_TESTNET,
-                api_key=config.BYBIT_API_KEY,
-                api_secret=config.BYBIT_API_SECRET,
-            )
-            # Try UNIFIED first, then CONTRACT, then SPOT
-            for account_type in ("UNIFIED", "CONTRACT", "SPOT"):
-                try:
-                    result = session.get_wallet_balance(accountType=account_type)
-                    acct_list = result.get("result", {}).get("list", [])
-                    if not acct_list:
+        """Fetch account balance — tries Bybit API, falls back to bot's internal tracking."""
+        # Try Bybit API first
+        if config.BYBIT_API_KEY and config.BYBIT_API_SECRET:
+            try:
+                for account_type in ("UNIFIED", "CONTRACT", "SPOT"):
+                    try:
+                        result = _bybit_signed_request(
+                            "/v5/account/wallet-balance",
+                            {"accountType": account_type},
+                        )
+                        acct_list = result.get("result", {}).get("list", [])
+                        if not acct_list:
+                            continue
+                        coins = acct_list[0].get("coin", [])
+                        usdt = next((c for c in coins if c["coin"] == "USDT"), None)
+                        if usdt and float(usdt.get("equity", 0)) > 0:
+                            return {
+                                "equity": float(usdt.get("equity", 0)),
+                                "available": float(usdt.get("availableToWithdraw", 0)),
+                                "wallet": float(usdt.get("walletBalance", 0)),
+                                "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)),
+                                "account_type": account_type,
+                            }
+                    except Exception:
                         continue
-                    coins = acct_list[0].get("coin", [])
-                    usdt = next((c for c in coins if c["coin"] == "USDT"), None)
-                    if usdt and float(usdt.get("equity", 0)) > 0:
-                        return {
-                            "equity": float(usdt.get("equity", 0)),
-                            "available": float(usdt.get("availableToWithdraw", 0)),
-                            "wallet": float(usdt.get("walletBalance", 0)),
-                            "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)),
-                            "account_type": account_type,
-                        }
-                except Exception:
-                    continue
-            # Fallback: return total equity from first account found
-            result = session.get_wallet_balance(accountType="UNIFIED")
-            acct_list = result.get("result", {}).get("list", [])
-            if acct_list:
-                total_eq = acct_list[0].get("totalEquity", "0")
+            except Exception:
+                pass
+
+        # Fallback: bot's internal equity tracking
+        try:
+            from main import get_shared_equity
+            eq = get_shared_equity()
+            if eq and eq.get("equity", 0) > 0:
                 return {
-                    "equity": float(total_eq),
-                    "available": 0,
-                    "wallet": float(total_eq),
-                    "unrealised_pnl": 0,
-                    "account_type": "UNIFIED",
-                    "note": "totalEquity fallback",
+                    "equity": eq["equity"],
+                    "available": eq["equity"],
+                    "wallet": eq["equity"],
+                    "unrealised_pnl": eq.get("daily_pnl", 0),
+                    "account_type": "BOT_INTERNAL",
                 }
-            return {"equity": 0, "error": "No USDT balance found on any account type"}
-        except ImportError:
-            return {"equity": 0, "error": "pybit not installed"}
-        except Exception as e:
-            return {"equity": 0, "error": str(e)}
+        except Exception:
+            pass
+        return {"equity": 0, "error": "Could not fetch balance"}
 
     @app.get("/api/positions")
     async def positions():
@@ -332,13 +373,10 @@ def create_app() -> "FastAPI":
         if not config.BYBIT_API_KEY:
             return {"positions": [], "error": "No API keys"}
         try:
-            from pybit.unified_trading import HTTP
-            session = HTTP(
-                testnet=config.BYBIT_TESTNET,
-                api_key=config.BYBIT_API_KEY,
-                api_secret=config.BYBIT_API_SECRET,
+            result = _bybit_signed_request(
+                "/v5/position/list",
+                {"category": config.CATEGORY, "symbol": config.SYMBOL},
             )
-            result = session.get_positions(category=config.CATEGORY, symbol=config.SYMBOL)
             pos_list = result.get("result", {}).get("list", [])
             out = []
             for p in pos_list:
