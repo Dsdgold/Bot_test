@@ -253,6 +253,8 @@ def create_app() -> "FastAPI":
     @app.get("/api/balance")
     async def balance():
         """Fetch account balance from Bybit."""
+        if not config.BYBIT_API_KEY or not config.BYBIT_API_SECRET:
+            return {"equity": 0, "error": "API keys not configured in .env"}
         try:
             from pybit.unified_trading import HTTP
             session = HTTP(
@@ -260,15 +262,39 @@ def create_app() -> "FastAPI":
                 api_key=config.BYBIT_API_KEY,
                 api_secret=config.BYBIT_API_SECRET,
             )
+            # Try UNIFIED first, then CONTRACT, then SPOT
+            for account_type in ("UNIFIED", "CONTRACT", "SPOT"):
+                try:
+                    result = session.get_wallet_balance(accountType=account_type)
+                    acct_list = result.get("result", {}).get("list", [])
+                    if not acct_list:
+                        continue
+                    coins = acct_list[0].get("coin", [])
+                    usdt = next((c for c in coins if c["coin"] == "USDT"), None)
+                    if usdt and float(usdt.get("equity", 0)) > 0:
+                        return {
+                            "equity": float(usdt.get("equity", 0)),
+                            "available": float(usdt.get("availableToWithdraw", 0)),
+                            "wallet": float(usdt.get("walletBalance", 0)),
+                            "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)),
+                            "account_type": account_type,
+                        }
+                except Exception:
+                    continue
+            # Fallback: return total equity from first account found
             result = session.get_wallet_balance(accountType="UNIFIED")
-            coins = result["result"]["list"][0]["coin"]
-            usdt = next((c for c in coins if c["coin"] == "USDT"), None)
-            return {
-                "equity": float(usdt["equity"]) if usdt else 0,
-                "available": float(usdt["availableToWithdraw"]) if usdt else 0,
-                "wallet": float(usdt["walletBalance"]) if usdt else 0,
-                "unrealised_pnl": float(usdt["unrealisedPnl"]) if usdt else 0,
-            }
+            acct_list = result.get("result", {}).get("list", [])
+            if acct_list:
+                total_eq = acct_list[0].get("totalEquity", "0")
+                return {
+                    "equity": float(total_eq),
+                    "available": 0,
+                    "wallet": float(total_eq),
+                    "unrealised_pnl": 0,
+                    "account_type": "UNIFIED",
+                    "note": "totalEquity fallback",
+                }
+            return {"equity": 0, "error": "No USDT balance found on any account type"}
         except ImportError:
             return {"equity": 0, "error": "pybit not installed"}
         except Exception as e:
