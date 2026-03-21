@@ -65,6 +65,8 @@ def get_quality_multiplier(entry_quality: int) -> float:
         return config.QUALITY_SIZE_MULTIPLIER_A
     elif entry_quality >= 70:
         return config.QUALITY_SIZE_MULTIPLIER_B
+    elif entry_quality >= config.TRADE_QUALITY_MIN:
+        return config.QUALITY_SIZE_MULTIPLIER_B * 0.75  # Reduced size for lower quality
     else:
         return 0.0  # Blocked
 
@@ -177,7 +179,7 @@ def calculate_position_size(
     # Quality multiplier
     quality_mult = get_quality_multiplier(entry_quality)
     if quality_mult == 0:
-        return _halted_result(f"Entry quality {entry_quality} < 70 — blocked")
+        return _halted_result(f"Entry quality {entry_quality} < {config.TRADE_QUALITY_MIN} — blocked")
 
     # Streak multiplier
     streak_mult = get_streak_multiplier(consecutive_losses)
