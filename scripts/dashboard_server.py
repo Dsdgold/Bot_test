@@ -323,11 +323,44 @@ def create_app() -> "FastAPI":
 
     @app.get("/api/balance")
     async def balance():
-        """Fetch account balance — tries Bybit API, falls back to bot's internal tracking."""
-        # Try Bybit API first
-        if config.BYBIT_API_KEY and config.BYBIT_API_SECRET:
+        """Fetch account balance — tries pybit, REST API, then bot's internal tracking."""
+        if not config.BYBIT_API_KEY or not config.BYBIT_API_SECRET:
+            pass  # skip to fallback
+        else:
+            # 1) Try pybit (works on Windows/local)
             try:
-                for account_type in ("UNIFIED", "CONTRACT", "SPOT"):
+                from pybit.unified_trading import HTTP
+                session = HTTP(
+                    testnet=config.BYBIT_TESTNET,
+                    api_key=config.BYBIT_API_KEY,
+                    api_secret=config.BYBIT_API_SECRET,
+                )
+                for account_type in ("UNIFIED", "CONTRACT"):
+                    try:
+                        result = session.get_wallet_balance(accountType=account_type)
+                        acct_list = result.get("result", {}).get("list", [])
+                        if not acct_list:
+                            continue
+                        coins = acct_list[0].get("coin", [])
+                        usdt = next((c for c in coins if c["coin"] == "USDT"), None)
+                        if usdt and float(usdt.get("equity", 0)) > 0:
+                            return {
+                                "equity": float(usdt.get("equity", 0)),
+                                "available": float(usdt.get("availableToWithdraw", 0)),
+                                "wallet": float(usdt.get("walletBalance", 0)),
+                                "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)),
+                                "account_type": account_type,
+                            }
+                    except Exception:
+                        continue
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
+            # 2) Try REST API (fallback when pybit not installed)
+            try:
+                for account_type in ("UNIFIED", "CONTRACT"):
                     try:
                         result = _bybit_signed_request(
                             "/v5/account/wallet-balance",
@@ -372,11 +405,28 @@ def create_app() -> "FastAPI":
         """Fetch open positions from Bybit — live PnL."""
         if not config.BYBIT_API_KEY:
             return {"positions": [], "error": "No API keys"}
+        result = None
+        # Try pybit first
         try:
-            result = _bybit_signed_request(
-                "/v5/position/list",
-                {"category": config.CATEGORY, "symbol": config.SYMBOL},
+            from pybit.unified_trading import HTTP
+            session = HTTP(
+                testnet=config.BYBIT_TESTNET,
+                api_key=config.BYBIT_API_KEY,
+                api_secret=config.BYBIT_API_SECRET,
             )
+            result = session.get_positions(category=config.CATEGORY, symbol=config.SYMBOL)
+        except Exception:
+            pass
+        # Fallback: REST API
+        if not result:
+            try:
+                result = _bybit_signed_request(
+                    "/v5/position/list",
+                    {"category": config.CATEGORY, "symbol": config.SYMBOL},
+                )
+            except Exception as e:
+                return {"positions": [], "error": str(e)}
+        try:
             pos_list = result.get("result", {}).get("list", [])
             out = []
             for p in pos_list:
