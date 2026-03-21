@@ -20,6 +20,7 @@ from trading_agent.log_sanitizer import setup_sanitized_logging
 from trading_agent.models import (
     Action, CandleData, DirectionalLicense, EntryGateResult, Regime, RegimeState,
 )
+from trading_agent.data_collector import DataCollector
 from trading_agent.risk_manager import (
     CooldownState, KillSwitchState, SLTPLevels,
     calculate_dynamic_sl_tp, check_cooldowns, check_kill_switches,
@@ -49,12 +50,14 @@ def _get_local_hour() -> int:
 class TradingAgent:
     """Main bot orchestrator using the Directional License model."""
 
-    def __init__(self):
+    def __init__(self, db_path: str | None = None):
         self.current_license: Optional[DirectionalLicense] = None
         self.is_running = False
         self.cooldown = CooldownState()
         self.kill_switch_state = KillSwitchState()
         self.candle_index = 0
+        self.data_collector = DataCollector(db_path)
+        self.equity: float = 0.0
         setup_sanitized_logging()
 
     def _log_decision(
@@ -251,7 +254,97 @@ class TradingAgent:
             vol_ratio=vol_ratio, ext_atr=ext_atr,
         )
 
+        # Data collection: persist decision snapshot
+        if gate_result.passed and license.is_trade:
+            decision = f"ENTRY_{license.action.value}"
+            trade_id = self.data_collector.new_trade_id()
+            direction = "LONG" if license.action == Action.LONG else "SHORT"
+            entry_price = sl_tp.entry_price if sl_tp else (candles_1m[-1].close if candles_1m else 0)
+            self.data_collector.start_mfe_mae(entry_price, direction)
+        else:
+            decision = "SKIP"
+            trade_id = None
+
+        self.data_collector.save_trade_decision(
+            decision=decision,
+            license=license,
+            gate_result=gate_result,
+            regime=regime,
+            candles_1m=candles_1m,
+            candles_5m=candles_5m,
+            candles_15m=candles_15m,
+            candles_1h=candles_1h,
+            sl_tp=sl_tp,
+            spread=spread,
+            funding_rate=funding_rate,
+            oi_current=oi_current,
+            oi_previous=oi_previous,
+            equity=self.equity,
+            latency_ms=int(latency_ms),
+            trade_id=trade_id,
+        )
+
+        # Market snapshot (periodic)
+        self.data_collector.save_market_snapshot(
+            candles_1m, regime, spread, funding_rate, oi_current,
+        )
+
+        # Equity snapshot (periodic)
+        self.data_collector.save_equity_snapshot(self.equity)
+
         return license, gate_result, sl_tp
+
+    def update_price_tick(self, current_price: float) -> None:
+        """Update MFE/MAE with new price tick during an open position."""
+        self.data_collector.update_mfe_mae(current_price)
+
+    def close_trade(
+        self,
+        license: DirectionalLicense,
+        gate_result: EntryGateResult,
+        regime: RegimeState,
+        candles_1m: Sequence[CandleData],
+        exit_price: float,
+        exit_type: str,
+        gross_pnl: float,
+        fees_paid: float,
+        net_pnl: float,
+        slippage_bps: float = 0.0,
+        sl_tp: Optional[SLTPLevels] = None,
+    ) -> None:
+        """Record a trade close with full data."""
+        mfe, mae = self.data_collector.close_mfe_mae()
+        hold_duration = self.data_collector.get_hold_duration()
+        is_win = net_pnl > 0
+        direction = "LONG" if license.action == Action.LONG else "SHORT"
+
+        self.data_collector.save_trade_decision(
+            decision=f"EXIT_{exit_type}",
+            license=license,
+            gate_result=gate_result,
+            regime=regime,
+            candles_1m=candles_1m,
+            sl_tp=sl_tp,
+            equity=self.equity,
+            trade_id=self.data_collector._active_trade_id,
+            exit_price=exit_price,
+            exit_type=exit_type,
+            gross_pnl=gross_pnl,
+            fees_paid=fees_paid,
+            net_pnl=net_pnl,
+            slippage_bps=slippage_bps,
+            hold_duration_sec=hold_duration,
+            mfe=mfe,
+            mae=mae,
+        )
+
+        # Update equity and stats
+        self.equity += net_pnl
+        self.data_collector.record_trade_stats(is_win, net_pnl)
+        self.data_collector.save_equity_snapshot(self.equity, force=True)
+
+        # Update cooldowns
+        self.cooldown.record_trade(direction, is_win, self.candle_index)
 
     def record_trade_result(self, direction: str, is_win: bool) -> None:
         """Record a trade result for cooldown tracking."""

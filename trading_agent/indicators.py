@@ -263,6 +263,44 @@ def check_oi_confirmation(
     return False, f"OI declining ({oi_pct:+.2f}%) — move unconfirmed"
 
 
+def rsi(candles: Sequence[CandleData], period: int = 14) -> float:
+    """Relative Strength Index."""
+    if len(candles) < period + 1:
+        return 50.0
+
+    closes = [c.close for c in candles]
+    gains = []
+    losses = []
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+
+    avg_gain = ema(gains, period)
+    avg_loss = ema(losses, period)
+
+    if not avg_gain or not avg_loss or avg_loss[-1] == 0:
+        return 100.0 if avg_gain and avg_gain[-1] > 0 else 50.0
+
+    rs = avg_gain[-1] / avg_loss[-1]
+    return 100 - (100 / (1 + rs))
+
+
+def macd_histogram(candles: Sequence[CandleData], fast: int = 12, slow: int = 26, signal: int = 9) -> float:
+    """MACD histogram value (MACD line - signal line)."""
+    if len(candles) < slow + signal:
+        return 0.0
+
+    closes = [c.close for c in candles]
+    ema_fast = ema(closes, fast)
+    ema_slow = ema(closes, slow)
+
+    macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
+    signal_line = ema(macd_line, signal)
+
+    return macd_line[-1] - signal_line[-1]
+
+
 def trend_direction(candles: Sequence[CandleData]) -> str:
     """Determine trend direction from EMA alignment."""
     if len(candles) < 21:

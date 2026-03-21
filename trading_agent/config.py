@@ -98,6 +98,15 @@ FREEZE_ON_EXTREME_FUNDING = os.getenv("FREEZE_ON_EXTREME_FUNDING", "true").lower
 MAX_FUNDING_RATE_ABS = float(os.getenv("MAX_FUNDING_RATE_ABS", "0.001"))
 LATENCY_KILL_SWITCH_MS = int(os.getenv("LATENCY_KILL_SWITCH_MS", "500"))
 
+# --- Data collection ---
+ENABLE_TRADE_SNAPSHOTS = os.getenv("ENABLE_TRADE_SNAPSHOTS", "true").lower() == "true"
+ENABLE_MARKET_SNAPSHOTS = os.getenv("ENABLE_MARKET_SNAPSHOTS", "true").lower() == "true"
+MARKET_SNAPSHOT_INTERVAL_SEC = int(os.getenv("MARKET_SNAPSHOT_INTERVAL_SEC", "300"))
+ENABLE_EQUITY_TRACKING = os.getenv("ENABLE_EQUITY_TRACKING", "true").lower() == "true"
+EQUITY_SNAPSHOT_INTERVAL_SEC = int(os.getenv("EQUITY_SNAPSHOT_INTERVAL_SEC", "900"))
+ENABLE_MFE_MAE_TRACKING = os.getenv("ENABLE_MFE_MAE_TRACKING", "true").lower() == "true"
+DB_PATH = os.getenv("DB_PATH", "bot_data.db")
+
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
 MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "10"))

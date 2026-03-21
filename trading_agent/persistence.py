@@ -1,4 +1,4 @@
-"""Database persistence for trade records (stub for chunk 1-2)."""
+"""Database persistence — schema migration and trade record storage."""
 
 from __future__ import annotations
 
@@ -7,17 +7,29 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from trading_agent import config
 from trading_agent.models import TradeRecord
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).resolve().parent.parent / "bot_data.db"
+
+def get_db_path() -> Path:
+    return Path(config.DB_PATH).resolve() if Path(config.DB_PATH).is_absolute() else \
+        Path(__file__).resolve().parent.parent / config.DB_PATH
 
 
 def get_connection() -> sqlite3.Connection:
-    """Get a database connection, creating tables if needed."""
-    conn = sqlite3.connect(str(DB_PATH))
+    """Get a database connection, running migrations as needed."""
+    db_path = get_db_path()
+    conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
+    _run_migrations(conn)
+    return conn
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Create all tables if they don't exist. Safe to run repeatedly."""
+    # Legacy trades table (from chunk 1-2)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,8 +51,14 @@ def get_connection() -> sqlite3.Connection:
             reason TEXT
         )
     """)
+
+    # Chunk 4 tables — imported from data_collector schema
+    from trading_agent.data_collector import ALL_SCHEMAS
+    for schema in ALL_SCHEMAS:
+        conn.execute(schema)
+
     conn.commit()
-    return conn
+    logger.debug("Database migration complete")
 
 
 def save_trade(trade: TradeRecord) -> int:
