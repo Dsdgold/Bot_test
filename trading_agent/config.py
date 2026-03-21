@@ -189,6 +189,23 @@ LOCKOUT_CYCLES = int(os.getenv("LOCKOUT_CYCLES", "5"))
 META_LEARNING_INTERVAL_HOURS = int(os.getenv("META_LEARNING_INTERVAL_HOURS", "72"))
 META_LEARNING_MAX_TOKENS = int(os.getenv("META_LEARNING_MAX_TOKENS", "500"))
 
+# --- Dashboard ---
+ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
+DASHBOARD_REFRESH_SEC = int(os.getenv("DASHBOARD_REFRESH_SEC", "10"))
+DASHBOARD_MODE = os.getenv("DASHBOARD_MODE", "web")
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+DASHBOARD_CHART_TIMEFRAME = os.getenv("DASHBOARD_CHART_TIMEFRAME", "15m")
+DASHBOARD_CHART_HOURS = int(os.getenv("DASHBOARD_CHART_HOURS", "4"))
+
+# --- Auto export ---
+AUTO_EXPORT_ENABLED = os.getenv("AUTO_EXPORT_ENABLED", "true").lower() == "true"
+AUTO_EXPORT_INTERVAL_HOURS = int(os.getenv("AUTO_EXPORT_INTERVAL_HOURS", "24"))
+AUTO_EXPORT_FORMAT = os.getenv("AUTO_EXPORT_FORMAT", "csv")
+AUTO_EXPORT_PATH = os.getenv("AUTO_EXPORT_PATH", "./exports/")
+AUTO_EXPORT_RETAIN_DAYS = int(os.getenv("AUTO_EXPORT_RETAIN_DAYS", "90"))
+
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
 MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "10"))
