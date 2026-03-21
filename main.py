@@ -724,7 +724,8 @@ async def run_bot(dry_run: bool = False):
                 # Position sizing
                 drawdown_pct = ((peak_equity - agent.equity) / peak_equity * 100) if peak_equity > 0 else 0
                 entry_price = sl_tp.entry_price if sl_tp else price
-                sl_price_calc = sl_tp.sl_price if sl_tp else entry_price * (0.997 if direction == "LONG" else 1.003)
+                sl_price_calc = (sl_tp.sl_price if sl_tp and hasattr(sl_tp, 'sl_price') else
+                                entry_price * (0.997 if direction == "LONG" else 1.003))
 
                 pos_result = calculate_position_size(
                     equity=agent.equity,
@@ -751,10 +752,12 @@ async def run_bot(dry_run: bool = False):
                     last_regime_trades += 1
                 else:
                     # ── LIVE EXECUTION ──
+                    tp_price_calc = (sl_tp.tp_price if sl_tp and hasattr(sl_tp, 'tp_price') else
+                                     price * (1.005 if direction == "LONG" else 0.995))
                     logger.info(
                         f"EXECUTING: {action} @ ${price:.1f} | "
                         f"Size: ${pos_result.size_usd:.2f} | SL: ${sl_price_calc:.2f} | "
-                        f"TP: ${sl_tp.tp_price:.2f if sl_tp else 0}"
+                        f"TP: ${tp_price_calc:.2f}"
                     )
 
                     order = place_order(direction, pos_result.size_usd, price)
@@ -763,7 +766,8 @@ async def run_bot(dry_run: bool = False):
                         active_direction = direction
                         active_entry_price = price
                         active_sl_price = sl_price_calc
-                        active_tp_price = sl_tp.tp_price if sl_tp else price * (1.005 if direction == "LONG" else 0.995)
+                        active_tp_price = (sl_tp.tp_price if sl_tp and hasattr(sl_tp, 'tp_price') else
+                                          price * (1.005 if direction == "LONG" else 0.995))
                         active_license = license_result
                         active_gate_result = gate_result
                         active_regime = agent.data_collector._last_regime if hasattr(agent.data_collector, '_last_regime') else None
