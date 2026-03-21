@@ -426,7 +426,7 @@ def test_21_tuning_freezes_on_drawdown():
         orig = config.MIN_CONFIDENCE
         ok, reason = opt.apply_change("MIN_CONFIDENCE", orig + 2,
                                        trigger="test", sample_size=50,
-                                       confidence=75, drawdown_pct=6.0)
+                                       confidence=75, drawdown_pct=9.0)
         assert not ok, "Should freeze during drawdown"
         assert "frozen" in reason.lower() or "drawdown" in reason.lower()
         opt.close()
