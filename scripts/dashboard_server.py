@@ -527,7 +527,13 @@ table.data tr:hover{background:#111}
 <div class="page active" id="page-monitor">
 <div class="main">
   <div class="panel chart-panel">
-    <h3>Chart <span style="color:#555;font-size:10px">(15m candles + EMA21)</span></h3>
+    <h3>Chart <span style="color:#555;font-size:10px">+ EMA21</span>
+      <span style="margin-left:12px">
+        <button onclick="changeInterval('1')" id="btn-tf-1" class="tf-btn" style="padding:2px 8px;font-size:10px;background:#222;color:#888;border:1px solid #333;border-radius:3px;cursor:pointer">1m</button>
+        <button onclick="changeInterval('3')" id="btn-tf-3" class="tf-btn" style="padding:2px 8px;font-size:10px;background:#222;color:#888;border:1px solid #333;border-radius:3px;cursor:pointer">3m</button>
+        <button onclick="changeInterval('15')" id="btn-tf-15" class="tf-btn tf-active" style="padding:2px 8px;font-size:10px;background:#333;color:#fff;border:1px solid #555;border-radius:3px;cursor:pointer">15m</button>
+      </span>
+    </h3>
     <div class="chart-area" id="chart"></div>
     <div class="status-bar" id="statusBar">
       <span class="tag" id="regimeTag">WAITING</span>
@@ -628,6 +634,8 @@ const LABELS = {POST_WIN:'WIN',POST_LOSS:'LOSS',POST_SKIP_REVIEW:'SKIP',
 
 let currentPage = 'monitor';
 let chart = null, candleSeries = null, emaSeries = null;
+let chartInterval = '3';  // default 3m for live feel
+let chartAutoRefresh = null;
 
 // ── SPA Navigation ──
 function showPage(page){
@@ -641,7 +649,7 @@ function showPage(page){
   if(page==='journal') loadFullJournal();
   if(page==='tuning') loadTuning();
   if(page==='strategy') loadStrategy();
-  if(page==='monitor' && !chart) initChart();
+  if(page==='monitor' && !chart) changeInterval(chartInterval);
 }
 
 // ── Chart (TradingView Lightweight Charts) ──
@@ -654,6 +662,18 @@ function calcEMA(data, period){
     ema.push({time:data[i].time, value:Math.round(prev*100)/100});
   }
   return ema;
+}
+
+function changeInterval(tf){
+  chartInterval = tf;
+  document.querySelectorAll('.tf-btn').forEach(b=>{b.style.background='#222';b.style.color='#888';b.style.border='1px solid #333';});
+  const active = document.getElementById('btn-tf-'+tf);
+  if(active){active.style.background='#333';active.style.color='#fff';active.style.border='1px solid #555';}
+  initChart();
+  // Set auto-refresh interval based on timeframe
+  if(chartAutoRefresh) clearInterval(chartAutoRefresh);
+  const refreshMs = tf==='1'?5000 : tf==='3'?10000 : 30000;
+  chartAutoRefresh = setInterval(refreshChart, refreshMs);
 }
 
 async function initChart(){
@@ -672,7 +692,7 @@ async function initChart(){
   });
   emaSeries = chart.addLineSeries({color:'#ffaa00',lineWidth:1,priceLineVisible:false});
   try{
-    const r = await fetch('/api/candles?interval=15&limit=200');
+    const r = await fetch('/api/candles?interval='+chartInterval+'&limit=200');
     const d = await r.json();
     if(d.candles && d.candles.length){
       candleSeries.setData(d.candles);
@@ -681,6 +701,10 @@ async function initChart(){
     }
   }catch(e){console.error('Chart error:',e)}
   window.addEventListener('resize',()=>{if(chart)chart.resize(el.clientWidth,280)});
+  // Start auto-refresh for chart
+  if(chartAutoRefresh) clearInterval(chartAutoRefresh);
+  const refreshMs = chartInterval==='1'?5000 : chartInterval==='3'?10000 : 30000;
+  chartAutoRefresh = setInterval(refreshChart, refreshMs);
 }
 
 function utcToLocal(utcStr){
@@ -695,7 +719,7 @@ function utcToLocal(utcStr){
 async function refreshChart(){
   if(!candleSeries) return;
   try{
-    const r = await fetch('/api/candles?interval=15&limit=200');
+    const r = await fetch('/api/candles?interval='+chartInterval+'&limit=200');
     const d = await r.json();
     if(d.candles && d.candles.length){
       candleSeries.setData(d.candles);
@@ -760,41 +784,19 @@ async function refresh(){
         (conc?' &mdash; <em>'+conc+'</em>':'')+'</div>';
     }).join('');
 
-    // Open positions (live from Bybit, with bot internal fallback)
+    // Open positions — prefer bot positions (shows each trade separately with SL/TP)
+    // Exchange position is aggregated (1 entry for all), so bot data is more useful
     const posDiv = document.getElementById('openPositions');
     const positions = pos.positions||[];
     const botPositions = botPos.positions||[];
+    const exchPos = positions.length>0 ? positions[0] : null;  // aggregated exchange data
     if(posDiv){
-      if(positions.length>0){
-        // Exchange positions available — show them
-        posDiv.innerHTML = positions.map(p=>{
-          const pnl = p.unrealised_pnl||0;
-          const cls = pnl>=0?'td-pos':'td-neg';
-          const pnlPct = p.pnl_pct||0;
-          const side = p.side==='Buy'?'LONG':'SHORT';
-          const sideClr = side==='LONG'?'#00cc55':'#cc3333';
-          return '<div style="background:#111;padding:8px;border-radius:4px;margin:4px 0;border-left:3px solid '+sideClr+'">'+
-            '<div style="display:flex;justify-content:space-between;align-items:center">'+
-            '<span style="color:'+sideClr+';font-weight:bold;font-size:13px">'+side+' '+p.size+' BTC</span>'+
-            '<span class="'+cls+'" style="font-size:14px;font-weight:bold">$'+pnl.toFixed(2)+' ('+pnlPct.toFixed(2)+'%)</span>'+
-            '</div>'+
-            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;color:#888;font-size:10px">'+
-            '<span>Entry: $'+p.entry_price.toFixed(1)+'</span>'+
-            '<span>Mark: $'+p.mark_price.toFixed(1)+'</span>'+
-            '<span>Lev: '+p.leverage+'x</span>'+
-            '<span>SL: $'+(p.stop_loss||0).toFixed(1)+'</span>'+
-            '<span>TP: $'+(p.take_profit||0).toFixed(1)+'</span>'+
-            '<span>Liq: $'+(p.liq_price||0).toFixed(0)+'</span>'+
-            '</div></div>';
-        }).join('');
-        const p0=positions[0];
-        const s0=p0.side==='Buy'?'LONG':'SHORT';
-        const pnl0=p0.unrealised_pnl||0;
-        document.getElementById('posStatus').textContent=s0+' '+p0.size+' BTC | PnL: $'+pnl0.toFixed(2);
-        document.getElementById('posStatus').style.color=pnl0>=0?'#00ff88':'#ff4444';
-      } else if(botPositions.length>0){
-        // Fallback: show bot's internal positions
+      if(botPositions.length>0){
+        // Show each bot-tracked trade with its own SL/TP
         const totalPnl = botPositions.reduce((s,p)=>s+(p.unrealised_pnl||0),0);
+        // Use exchange PnL if available (more accurate, real-time)
+        const exchPnl = exchPos ? exchPos.unrealised_pnl : null;
+        const displayPnl = exchPnl !== null ? exchPnl : totalPnl;
         posDiv.innerHTML = botPositions.map(p=>{
           const pnl = p.unrealised_pnl||0;
           const cls = pnl>=0?'td-pos':'td-neg';
@@ -810,10 +812,32 @@ async function refresh(){
             '<span>SL: $'+p.sl_price.toFixed(1)+'</span>'+
             '<span>TP: $'+p.tp_price.toFixed(1)+'</span>'+
             '</div></div>';
-        }).join('');
+        }).join('') +
+        (exchPos ? '<div style="color:#555;font-size:10px;padding:4px;text-align:right">Exchange total: $'+exchPos.unrealised_pnl.toFixed(2)+' | Lev: '+exchPos.leverage+'x | Liq: $'+(exchPos.liq_price||0).toFixed(0)+'</div>' : '');
         const s0=botPositions[0].direction||'SHORT';
-        document.getElementById('posStatus').textContent=s0+' '+botPositions.length+'x | PnL: $'+totalPnl.toFixed(2);
-        document.getElementById('posStatus').style.color=totalPnl>=0?'#00ff88':'#ff4444';
+        document.getElementById('posStatus').textContent=s0+' '+botPositions.length+'x | PnL: $'+displayPnl.toFixed(2);
+        document.getElementById('posStatus').style.color=displayPnl>=0?'#00ff88':'#ff4444';
+      } else if(positions.length>0){
+        // No bot positions but exchange shows something (edge case: manual trade)
+        posDiv.innerHTML = positions.map(p=>{
+          const pnl = p.unrealised_pnl||0;
+          const cls = pnl>=0?'td-pos':'td-neg';
+          const side = p.side==='Buy'?'LONG':'SHORT';
+          const sideClr = side==='LONG'?'#00cc55':'#cc3333';
+          return '<div style="background:#111;padding:8px;border-radius:4px;margin:4px 0;border-left:3px solid '+sideClr+'">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="color:'+sideClr+';font-weight:bold;font-size:13px">'+side+' '+p.size+' BTC</span>'+
+            '<span class="'+cls+'" style="font-size:14px;font-weight:bold">$'+pnl.toFixed(2)+'</span>'+
+            '</div>'+
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;color:#888;font-size:10px">'+
+            '<span>Entry: $'+p.entry_price.toFixed(1)+'</span>'+
+            '<span>Lev: '+p.leverage+'x</span>'+
+            '<span>Liq: $'+(p.liq_price||0).toFixed(0)+'</span>'+
+            '</div></div>';
+        }).join('');
+        const p0=positions[0];const s0=p0.side==='Buy'?'LONG':'SHORT';
+        document.getElementById('posStatus').textContent=s0+' '+p0.size+' BTC | PnL: $'+(p0.unrealised_pnl||0).toFixed(2);
+        document.getElementById('posStatus').style.color=(p0.unrealised_pnl||0)>=0?'#00ff88':'#ff4444';
       } else {
         posDiv.innerHTML='<div style="color:#666;padding:4px">No open positions</div>';
         document.getElementById('posStatus').textContent='Position: FLAT';
