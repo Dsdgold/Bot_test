@@ -321,6 +321,13 @@ def create_app() -> "FastAPI":
         except Exception as e:
             return {"candles": [], "error": str(e)}
 
+    def _safe_float(val, default=0.0):
+        """Convert to float safely — handles empty strings from Bybit."""
+        try:
+            return float(val) if val and str(val).strip() else default
+        except (ValueError, TypeError):
+            return default
+
     @app.get("/api/balance")
     async def balance():
         """Fetch account balance — tries pybit then bot's internal tracking."""
@@ -339,26 +346,17 @@ def create_app() -> "FastAPI":
                 acct_list = result.get("result", {}).get("list", [])
                 if acct_list:
                     acct = acct_list[0]
-                    # Try totalEquity first (works for all account types)
-                    total_eq = float(acct.get("totalEquity", 0))
-                    # Also check USDT coin
+                    total_eq = _safe_float(acct.get("totalEquity"))
                     coins = acct.get("coin", [])
                     usdt = next((c for c in coins if c["coin"] == "USDT"), None)
-                    equity = float(usdt.get("equity", 0)) if usdt else total_eq
-                    if equity > 0:
+                    equity = _safe_float(usdt.get("equity")) if usdt else total_eq
+                    if equity > 0 or total_eq > 0:
+                        eq = equity if equity > 0 else total_eq
                         return {
-                            "equity": equity,
-                            "available": float(usdt.get("availableToWithdraw", 0)) if usdt else 0,
-                            "wallet": float(usdt.get("walletBalance", 0)) if usdt else equity,
-                            "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)) if usdt else 0,
-                            "account_type": "UNIFIED",
-                        }
-                    elif total_eq > 0:
-                        return {
-                            "equity": total_eq,
-                            "available": 0,
-                            "wallet": total_eq,
-                            "unrealised_pnl": 0,
+                            "equity": eq,
+                            "available": _safe_float(usdt.get("availableToWithdraw")) if usdt else 0,
+                            "wallet": _safe_float(usdt.get("walletBalance")) if usdt else eq,
+                            "unrealised_pnl": _safe_float(usdt.get("unrealisedPnl")) if usdt else 0,
                             "account_type": "UNIFIED",
                         }
             except Exception as e:
