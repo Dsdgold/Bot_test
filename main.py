@@ -970,8 +970,8 @@ async def run_bot(dry_run: bool = False):
                 except Exception as e:
                     logger.warning(f"Strategy evolution error: {e}")
 
-            # ── Record cycle observation to journal (every 3 cycles) ──
-            if cycle % 3 == 0:
+            # ── Record cycle observation to journal (every cycle) ──
+            if True:
                 journal.record_cycle_observation(
                     cycle=cycle,
                     price=price,

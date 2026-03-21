@@ -860,7 +860,7 @@ async function refresh(){
   try{
     const [status,journal,bal,pos,botPos] = await Promise.all([
       fetch('/api/status').then(r=>r.json()),
-      fetch('/api/journal?limit=12').then(r=>r.json()),
+      fetch('/api/journal?limit=30').then(r=>r.json()),
       fetch('/api/balance').then(r=>r.json()),
       fetch('/api/positions').then(r=>r.json()),
       fetch('/api/bot-positions').then(r=>r.json()),
@@ -906,8 +906,8 @@ async function refresh(){
       const cls = ICONS[e.entry_type]||'icon-skip';
       const label = LABELS[e.entry_type]||e.entry_type;
       const time = utcToLocal(e.timestamp_utc);
-      const obs = (e.observation||'').substring(0,200);
-      const conc = (e.conclusion||'').substring(0,150);
+      const obs = (e.observation||'').substring(0,350);
+      const conc = (e.conclusion||'').substring(0,250);
       return '<div class="journal-entry"><span class="time">'+time+'</span> '+
         '<span class="'+cls+'">'+label+'</span> '+obs+
         (conc?' &mdash; <em>'+conc+'</em>':'')+'</div>';
