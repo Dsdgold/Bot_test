@@ -12,12 +12,18 @@ from typing import Sequence
 
 from trading_agent import config
 from trading_agent.indicators import (
-    adx, ema_slope, extension_from_ema, trend_direction, volume_ratio,
+    adx, check_cvd_alignment, check_oi_confirmation,
+    ema_slope, extension_from_ema, trend_direction, volume_ratio,
 )
 from trading_agent.models import (
     Action, CandleData, DirectionalLicense, EntryGateResult,
     HTFAlignment, Regime, RegimeState, SetupType,
 )
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +185,76 @@ def check_reversal_requirements(license: DirectionalLicense) -> tuple[bool, str]
 
 
 # ---------------------------------------------------------------------------
+# Sub-gate G: CVD alignment
+# ---------------------------------------------------------------------------
+
+def check_cvd(
+    candles_1m: Sequence[CandleData],
+    license: DirectionalLicense,
+) -> tuple[bool, str]:
+    """Check CVD alignment with trade direction."""
+    if not config.REQUIRE_CVD_ALIGNMENT:
+        return True, "CVD check disabled"
+
+    if not license.is_trade or not candles_1m or len(candles_1m) < 6:
+        return True, "No CVD check needed"
+
+    direction = "LONG" if license.action == Action.LONG else "SHORT"
+    return check_cvd_alignment(candles_1m, direction)
+
+
+# ---------------------------------------------------------------------------
+# Sub-gate H: OI confirmation
+# ---------------------------------------------------------------------------
+
+def check_oi(
+    oi_current: float | None,
+    oi_previous: float | None,
+    price_new_extreme: bool = False,
+) -> tuple[bool, str]:
+    """Check Open Interest confirms the move."""
+    if not config.REQUIRE_OI_CONFIRMATION:
+        return True, "OI check disabled"
+
+    if oi_current is None or oi_previous is None:
+        # Graceful degradation — log warning but don't block
+        return True, "OI data unavailable — skipping check"
+
+    return check_oi_confirmation(oi_current, oi_previous, price_new_extreme)
+
+
+# ---------------------------------------------------------------------------
+# Sub-gate I: Session / hour-of-day filter
+# ---------------------------------------------------------------------------
+
+def check_session_filter(timestamp: Sequence[CandleData] | None = None) -> tuple[bool, str]:
+    """Block trading during configured underperforming hours."""
+    if not config.SESSION_FILTER_ENABLED:
+        return True, "Session filter disabled"
+
+    if not config.BLOCKED_HOURS_LOCAL:
+        return True, "No blocked hours configured"
+
+    if ZoneInfo is None:
+        return True, "zoneinfo not available — session filter skipped"
+
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+
+    try:
+        local_tz = ZoneInfo(config.TIMEZONE)
+        now_local = now_utc.astimezone(local_tz)
+        current_hour = now_local.hour
+    except Exception:
+        return True, f"Invalid timezone {config.TIMEZONE} — session filter skipped"
+
+    if current_hour in config.BLOCKED_HOURS_LOCAL:
+        return False, f"Blocked hour: {current_hour}:00 {config.TIMEZONE}"
+
+    return True, f"Session OK: {current_hour}:00 {config.TIMEZONE}"
+
+
+# ---------------------------------------------------------------------------
 # Master gate: evaluate all sub-gates
 # ---------------------------------------------------------------------------
 
@@ -189,6 +265,9 @@ def evaluate_entry_gates(
     candles_5m: Sequence[CandleData],
     candles_15m: Sequence[CandleData],
     candles_1h: Sequence[CandleData],
+    oi_current: float | None = None,
+    oi_previous: float | None = None,
+    price_new_extreme: bool = False,
 ) -> EntryGateResult:
     """
     Run all entry sub-gates. ALL must pass for a trade to be allowed.
@@ -277,6 +356,24 @@ def evaluate_entry_gates(
     result.reversal_ok = rev_ok
     if not rev_ok:
         result.add_block(f"Reversal: {rev_reason}")
+
+    # Gate G: CVD alignment
+    cvd_ok, cvd_reason = check_cvd(candles_1m, license)
+    result.cvd_ok = cvd_ok
+    if not cvd_ok:
+        result.add_block(f"CVD: {cvd_reason}")
+
+    # Gate H: OI confirmation
+    oi_ok, oi_reason = check_oi(oi_current, oi_previous, price_new_extreme)
+    result.oi_ok = oi_ok
+    if not oi_ok:
+        result.add_block(f"OI: {oi_reason}")
+
+    # Gate I: Session filter
+    session_ok, session_reason = check_session_filter()
+    result.session_ok = session_ok
+    if not session_ok:
+        result.add_block(f"Session: {session_reason}")
 
     return result
 

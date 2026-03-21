@@ -55,7 +55,50 @@ TIMEFRAME_1H = "60"
 FALLBACK_MIN_CONFIDENCE = int(os.getenv("FALLBACK_MIN_CONFIDENCE", "80"))
 FALLBACK_MIN_QUALITY = int(os.getenv("FALLBACK_MIN_QUALITY", "85"))
 
-# --- Risk / Position (stubs for later chunks) ---
+# --- Microstructure / order flow ---
+REQUIRE_OI_CONFIRMATION = os.getenv("REQUIRE_OI_CONFIRMATION", "true").lower() == "true"
+REQUIRE_CVD_ALIGNMENT = os.getenv("REQUIRE_CVD_ALIGNMENT", "true").lower() == "true"
+
+# --- Execution ---
+PREFER_POST_ONLY_ENTRIES = os.getenv("PREFER_POST_ONLY_ENTRIES", "true").lower() == "true"
+MAX_ALLOWED_SLIPPAGE_BPS = float(os.getenv("MAX_ALLOWED_SLIPPAGE_BPS", "5"))
+TAKER_FEE_RATE = float(os.getenv("TAKER_FEE_RATE", "0.00055"))
+MAKER_FEE_RATE = float(os.getenv("MAKER_FEE_RATE", "0.0002"))
+MAX_SPREAD_TOLERANCE_USDT = float(os.getenv("MAX_SPREAD_TOLERANCE_USDT", "2.5"))
+
+# --- Dynamic SL/TP ---
+USE_DYNAMIC_SL_TP = os.getenv("USE_DYNAMIC_SL_TP", "true").lower() == "true"
+ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "1.0"))
+TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "1.6"))
+TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.35"))
+TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.2"))
+MIN_NET_RR = float(os.getenv("MIN_NET_RR", "1.15"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.35"))
+MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.90"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.45"))
+MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "1.50"))
+
+# --- Session filter ---
+SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").lower() == "true"
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Warsaw")
+BLOCKED_HOURS_LOCAL = [
+    int(h.strip()) for h in os.getenv("BLOCKED_HOURS_LOCAL", "").split(",")
+    if h.strip().isdigit()
+]
+MIN_SAMPLE_PER_HOUR = int(os.getenv("MIN_SAMPLE_PER_HOUR", "10"))
+
+# --- Cooldowns ---
+POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "600"))
+REENTRY_COOLDOWN_CANDLES = int(os.getenv("REENTRY_COOLDOWN_CANDLES", "3"))
+SAME_SIDE_LOSS_PAUSE_COUNT = int(os.getenv("SAME_SIDE_LOSS_PAUSE_COUNT", "2"))
+SAME_SIDE_LOSS_PAUSE_SEC = int(os.getenv("SAME_SIDE_LOSS_PAUSE_SEC", "1800"))
+
+# --- Kill switches ---
+FREEZE_ON_EXTREME_FUNDING = os.getenv("FREEZE_ON_EXTREME_FUNDING", "true").lower() == "true"
+MAX_FUNDING_RATE_ABS = float(os.getenv("MAX_FUNDING_RATE_ABS", "0.001"))
+LATENCY_KILL_SWITCH_MS = int(os.getenv("LATENCY_KILL_SWITCH_MS", "500"))
+
+# --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
 MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "10"))
 DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.4"))

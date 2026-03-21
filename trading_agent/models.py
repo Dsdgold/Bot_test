@@ -93,6 +93,9 @@ class EntryGateResult:
     volume_ok: bool = False
     reversal_ok: bool = True  # True by default (only checked for reversals)
     regime_ok: bool = False
+    cvd_ok: bool = True  # True by default (skipped if disabled)
+    oi_ok: bool = True   # True by default (skipped if data unavailable)
+    session_ok: bool = True
     reasons: list[str] = field(default_factory=list)
 
     def add_block(self, reason: str) -> None:

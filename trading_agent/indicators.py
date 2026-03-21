@@ -190,6 +190,79 @@ def extension_from_ema(candles: Sequence[CandleData], period: int = 21) -> float
     return abs(current_price - current_ema) / current_atr
 
 
+# ---------------------------------------------------------------------------
+# Microstructure: CVD and OI
+# ---------------------------------------------------------------------------
+
+def compute_cvd(candles: Sequence[CandleData]) -> list[float]:
+    """
+    Approximate Cumulative Volume Delta from candle data.
+
+    Uses the close-position-in-range heuristic:
+    delta = volume * (2 * (close - low) / (high - low) - 1)
+    Positive delta = aggressive buying, negative = aggressive selling.
+    """
+    cvd = []
+    cumulative = 0.0
+    for c in candles:
+        rng = c.high - c.low
+        if rng > 0:
+            buy_ratio = (c.close - c.low) / rng
+            delta = c.volume * (2 * buy_ratio - 1)
+        else:
+            delta = 0.0
+        cumulative += delta
+        cvd.append(cumulative)
+    return cvd
+
+
+def check_cvd_alignment(candles: Sequence[CandleData], direction: str, lookback: int = 5) -> tuple[bool, str]:
+    """
+    Check if CVD trend aligns with trade direction.
+    For LONG: CVD should be rising. For SHORT: CVD should be falling.
+    """
+    if len(candles) < lookback + 1:
+        return False, "Insufficient data for CVD"
+
+    cvd = compute_cvd(candles)
+    recent_cvd = cvd[-lookback:]
+    cvd_change = recent_cvd[-1] - recent_cvd[0]
+
+    if direction == "LONG" and cvd_change > 0:
+        return True, f"CVD rising ({cvd_change:.0f}) — confirms LONG"
+    elif direction == "SHORT" and cvd_change < 0:
+        return True, f"CVD falling ({cvd_change:.0f}) — confirms SHORT"
+    elif direction == "LONG":
+        return False, f"CVD divergence: falling ({cvd_change:.0f}) vs LONG"
+    else:
+        return False, f"CVD divergence: rising ({cvd_change:.0f}) vs SHORT"
+
+
+def check_oi_confirmation(
+    oi_current: float | None,
+    oi_previous: float | None,
+    price_new_extreme: bool = False,
+) -> tuple[bool, str]:
+    """
+    Check Open Interest confirmation.
+    Valid breakout: rising OI (new money entering).
+    Price extreme + dropping OI: short covering / liquidation → WAIT.
+    """
+    if oi_current is None or oi_previous is None:
+        return False, "OI data unavailable"
+
+    oi_change = oi_current - oi_previous
+    oi_pct = (oi_change / oi_previous * 100) if oi_previous > 0 else 0
+
+    if oi_change > 0:
+        return True, f"OI rising ({oi_pct:+.2f}%) — new money confirming move"
+
+    if price_new_extreme and oi_change < 0:
+        return False, f"OI dropping ({oi_pct:+.2f}%) at price extreme — likely short covering/liquidation"
+
+    return False, f"OI declining ({oi_pct:+.2f}%) — move unconfirmed"
+
+
 def trend_direction(candles: Sequence[CandleData]) -> str:
     """Determine trend direction from EMA alignment."""
     if len(candles) < 21:
