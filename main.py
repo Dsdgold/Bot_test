@@ -439,6 +439,8 @@ async def run_bot(dry_run: bool = False):
     last_regime_trades = 0
     last_tuning_cycle = time.time()
     last_meta_learning = time.time()
+    last_trade_time = time.time()
+    relax_level = 0  # 0=normal, 1=relaxed, 2=very relaxed, 3=ultra relaxed
     current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     current_week = datetime.now(timezone.utc).isocalendar()[1]
 
@@ -642,6 +644,39 @@ async def run_bot(dry_run: bool = False):
                 await asyncio.sleep(max(0, LOOP_INTERVAL_SEC - (time.time() - cycle_start)))
                 continue
 
+            # ── Auto-relax: loosen filters if no trades for too long ──
+            mins_since_trade = (time.time() - last_trade_time) / 60
+            new_relax = 0
+            if mins_since_trade > 30:
+                new_relax = 3  # ultra
+            elif mins_since_trade > 20:
+                new_relax = 2  # very relaxed
+            elif mins_since_trade > 10:
+                new_relax = 1  # relaxed
+
+            if new_relax != relax_level:
+                relax_level = new_relax
+                if relax_level == 1:
+                    config.CANDLE_CLOSE_CONFIRMATION = False
+                    config.REQUIRE_CVD_ALIGNMENT = False
+                    logger.info("AUTO-RELAX L1 (10min no trade): disabled candle confirm + CVD")
+                elif relax_level == 2:
+                    config.REQUIRE_OI_CONFIRMATION = False
+                    config.MIN_CONFIDENCE = max(35, config.MIN_CONFIDENCE - 10)
+                    config.TRADE_QUALITY_MIN = max(40, config.TRADE_QUALITY_MIN - 10)
+                    logger.info("AUTO-RELAX L2 (20min): disabled OI, lowered confidence/quality")
+                elif relax_level == 3:
+                    config.MIN_CONFIDENCE = max(30, config.MIN_CONFIDENCE - 5)
+                    config.TRADE_QUALITY_MIN = max(30, config.TRADE_QUALITY_MIN - 5)
+                    config.ENABLE_FALLBACK_OVERRIDE = True
+                    logger.info("AUTO-RELAX L3 (30min): ultra-low thresholds, fallback ON")
+                elif relax_level == 0:
+                    # Reset to defaults after a trade
+                    config.CANDLE_CLOSE_CONFIRMATION = True
+                    config.REQUIRE_CVD_ALIGNMENT = True
+                    config.REQUIRE_OI_CONFIRMATION = True
+                    logger.info("FILTERS RESET to normal after trade")
+
             # ── Get journal insights for AI memory ──
             journal_entries = journal.get_recent_entries(limit=10)
 
@@ -750,6 +785,8 @@ async def run_bot(dry_run: bool = False):
                     )
                     skip_tracker.record_trade()
                     last_regime_trades += 1
+                    last_trade_time = time.time()
+                    relax_level = 0
                 else:
                     # ── LIVE EXECUTION ──
                     tp_price_calc = (sl_tp.tp_price if sl_tp and hasattr(sl_tp, 'tp_price') else
@@ -776,6 +813,8 @@ async def run_bot(dry_run: bool = False):
                         # Set SL/TP on exchange
                         set_stop_loss_take_profit(active_sl_price, active_tp_price, direction)
                         skip_tracker.record_trade()
+                        last_trade_time = time.time()
+                        relax_level = 0
                         last_regime_trades += 1
                     else:
                         logger.error("Order placement failed — staying flat")
