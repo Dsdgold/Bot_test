@@ -175,6 +175,62 @@ def create_app() -> "FastAPI":
         return {"success": True, "exit_type": "MANUAL_OWNER",
                 "message": "Manual close — execute via exchange API"}
 
+    @app.get("/api/candles")
+    async def candles(interval: str = "15", limit: int = 200):
+        """Fetch candles from Bybit for the chart."""
+        try:
+            from pybit.unified_trading import HTTP
+            session = HTTP(
+                testnet=config.BYBIT_TESTNET,
+                api_key=config.BYBIT_API_KEY,
+                api_secret=config.BYBIT_API_SECRET,
+            )
+            result = session.get_kline(
+                category=config.CATEGORY,
+                symbol=config.SYMBOL,
+                interval=interval,
+                limit=limit,
+            )
+            out = []
+            for item in reversed(result["result"]["list"]):
+                out.append({
+                    "time": int(item[0]) // 1000,
+                    "open": float(item[1]),
+                    "high": float(item[2]),
+                    "low": float(item[3]),
+                    "close": float(item[4]),
+                    "volume": float(item[5]),
+                })
+            return {"candles": out, "symbol": config.SYMBOL}
+        except ImportError:
+            return {"candles": [], "error": "pybit not installed"}
+        except Exception as e:
+            return {"candles": [], "error": str(e)}
+
+    @app.get("/api/balance")
+    async def balance():
+        """Fetch account balance from Bybit."""
+        try:
+            from pybit.unified_trading import HTTP
+            session = HTTP(
+                testnet=config.BYBIT_TESTNET,
+                api_key=config.BYBIT_API_KEY,
+                api_secret=config.BYBIT_API_SECRET,
+            )
+            result = session.get_wallet_balance(accountType="UNIFIED")
+            coins = result["result"]["list"][0]["coin"]
+            usdt = next((c for c in coins if c["coin"] == "USDT"), None)
+            return {
+                "equity": float(usdt["equity"]) if usdt else 0,
+                "available": float(usdt["availableToWithdraw"]) if usdt else 0,
+                "wallet": float(usdt["walletBalance"]) if usdt else 0,
+                "unrealised_pnl": float(usdt["unrealisedPnl"]) if usdt else 0,
+            }
+        except ImportError:
+            return {"equity": 0, "error": "pybit not installed"}
+        except Exception as e:
+            return {"equity": 0, "error": str(e)}
+
     # ── Frontend ────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)
