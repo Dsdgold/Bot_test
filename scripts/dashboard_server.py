@@ -944,7 +944,8 @@ async function refresh(){
         }).join('') +
         (exchPos ? '<div style="color:#555;font-size:10px;padding:4px;text-align:right">Exchange total: $'+exchPos.unrealised_pnl.toFixed(2)+' | Lev: '+exchPos.leverage+'x | Liq: $'+(exchPos.liq_price||0).toFixed(0)+'</div>' : '');
         const s0=botPositions[0].direction||'SHORT';
-        document.getElementById('posStatus').textContent=s0+' '+botPositions.length+'x | PnL: $'+displayPnl.toFixed(2);
+        const levStr = exchPos ? exchPos.leverage+'x' : '';
+        document.getElementById('posStatus').textContent=s0+' '+levStr+' | PnL: $'+displayPnl.toFixed(2);
         document.getElementById('posStatus').style.color=displayPnl>=0?'#00ff88':'#ff4444';
       } else if(positions.length>0){
         // No bot positions but exchange shows something (edge case: manual trade)
