@@ -641,6 +641,7 @@ async def run_bot(dry_run: bool = False):
 
             # ── Skip if we already have an active trade ──
             if active_trade_id:
+                logger.info(f"Position open: {active_direction} @ {active_entry_price:.2f} | SL={active_sl_price:.2f} TP={active_tp_price:.2f} — monitoring...")
                 await asyncio.sleep(max(0, LOOP_INTERVAL_SEC - (time.time() - cycle_start)))
                 continue
 
