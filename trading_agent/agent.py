@@ -153,6 +153,28 @@ class TradingAgent:
         regime = classify_regime(candles_1m)
         logger.info(f"Regime: {regime.regime.value} — {regime.details}")
 
+        # Step 2b: Block untradeable regimes BEFORE calling AI (saves tokens)
+        if config.REGIME_FILTER_ENABLED and regime.regime in (
+            Regime.DEAD_LOW_VOL, Regime.RANGING
+        ):
+            from trading_agent.ai_brain import _wait_license
+            license = _wait_license(f"Regime {regime.regime.value} — no AI call needed")
+            gate_result = EntryGateResult(passed=False)
+            gate_result.add_block(f"Regime: {regime.regime.value}")
+            self._log_decision(license, gate_result, regime)
+            # Still collect data
+            self.data_collector.save_trade_decision(
+                decision="SKIP", license=license, gate_result=gate_result,
+                regime=regime, candles_1m=candles_1m,
+                spread=spread, funding_rate=funding_rate,
+                equity=self.equity, latency_ms=int(latency_ms),
+            )
+            self.data_collector.save_market_snapshot(
+                candles_1m, regime, spread, funding_rate, oi_current,
+            )
+            self.data_collector.save_equity_snapshot(self.equity)
+            return license, gate_result, None
+
         # Step 3: Build indicator summary for AI
         indicators = {}
         vol_ratio = 0.0
