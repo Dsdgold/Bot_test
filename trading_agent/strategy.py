@@ -51,13 +51,14 @@ def check_htf_alignment(
     trend_15m = trend_direction(candles_15m) if candles_15m else "NEUTRAL"
     trend_5m = trend_direction(candles_5m) if candles_5m else "NEUTRAL"
 
-    # 1h clearly opposing → block
+    # 1h clearly opposing → warning only (not a hard block)
     opposing_1h = (
         (direction == "UP" and trend_1h == "DOWN") or
         (direction == "DOWN" and trend_1h == "UP")
     )
     if opposing_1h:
-        return False, f"1h opposing ({trend_1h}) vs trade direction ({direction})"
+        logger.info(f"HTF WARNING: 1h opposing ({trend_1h}) vs {direction} — allowing with caution")
+        return True, f"HTF cautious: 1h opposing ({trend_1h}) but allowing trade"
 
     # 15m AND 1h aligned → pass
     aligned_15m = trend_15m == direction or trend_15m == "NEUTRAL"
