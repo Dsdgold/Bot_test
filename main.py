@@ -541,6 +541,20 @@ async def run_bot(dry_run: bool = False):
     set_system_prompt(strategy_evo.current_prompt)
     logger.info(f"Strategy loaded: v{strategy_evo.current_version}")
 
+    # Set leverage on Bybit
+    if not dry_run:
+        try:
+            session = _get_session()
+            session.set_leverage(
+                category=config.CATEGORY,
+                symbol=config.SYMBOL,
+                buyLeverage=str(config.MAX_LEVERAGE),
+                sellLeverage=str(config.MAX_LEVERAGE),
+            )
+            logger.info(f"Leverage set to {config.MAX_LEVERAGE}x on Bybit")
+        except Exception as e:
+            logger.warning(f"Could not set leverage: {e}")
+
     # Fetch initial equity from Bybit
     initial_equity = await fetch_account_equity()
     if initial_equity > 0:
