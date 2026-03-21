@@ -19,7 +19,9 @@ import signal
 import sys
 import time
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from trading_agent import config
 from trading_agent.agent import TradingAgent
@@ -32,6 +34,26 @@ from trading_agent.self_optimizer import SelfOptimizer
 logger = logging.getLogger(__name__)
 
 LOOP_INTERVAL_SEC = 60  # 1-minute candle cycle
+
+
+# ---------------------------------------------------------------------------
+# Multi-position tracking
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ActivePosition:
+    """Tracks a single virtual position within a potentially aggregated exchange position."""
+    trade_id: str
+    direction: str
+    entry_price: float
+    sl_price: float
+    tp_price: float
+    qty_btc: float
+    license: Any = None
+    gate_result: Any = None
+    regime: Any = None
+    sl_tp: Any = None
+    opened_at: float = field(default_factory=time.time)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +299,55 @@ def close_all_positions() -> bool:
         return False
 
 
+def close_partial_position(direction: str, qty_btc: float) -> bool:
+    """Close a partial position (reduceOnly) for multi-position management."""
+    try:
+        session = _get_session()
+        side = "Sell" if direction == "LONG" else "Buy"
+        result = session.place_order(
+            category=config.CATEGORY,
+            symbol=config.SYMBOL,
+            side=side,
+            orderType="Market",
+            qty=str(qty_btc),
+            timeInForce="GTC",
+            reduceOnly=True,
+        )
+        if result.get("retCode") == 0:
+            logger.info(f"PARTIAL CLOSE: {side} {qty_btc} BTC (reduceOnly)")
+            return True
+        else:
+            logger.error(f"PARTIAL CLOSE FAILED: {result.get('retMsg')}")
+            return False
+    except Exception as e:
+        logger.error(f"Partial close error: {e}")
+        return False
+
+
+def update_exchange_sl(positions: dict[str, ActivePosition]) -> None:
+    """Update exchange SL to the widest stop among active positions (safety net)."""
+    if not positions:
+        return
+    first = next(iter(positions.values()))
+    direction = first.direction
+    if direction == "LONG":
+        widest_sl = min(p.sl_price for p in positions.values())
+    else:
+        widest_sl = max(p.sl_price for p in positions.values())
+    try:
+        session = _get_session()
+        session.set_trading_stop(
+            category=config.CATEGORY,
+            symbol=config.SYMBOL,
+            stopLoss=str(round(widest_sl, 2)),
+            takeProfit="0",  # we manage TP internally
+            positionIdx=0,
+        )
+        logger.info(f"Exchange safety SL updated: ${widest_sl:.2f}")
+    except Exception as e:
+        logger.error(f"Exchange SL update error: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Skip tracking for journal
 # ---------------------------------------------------------------------------
@@ -444,16 +515,8 @@ async def run_bot(dry_run: bool = False):
     current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     current_week = datetime.now(timezone.utc).isocalendar()[1]
 
-    # Active trade state
-    active_trade_id: str | None = None
-    active_direction: str | None = None
-    active_entry_price: float = 0.0
-    active_sl_price: float = 0.0
-    active_tp_price: float = 0.0
-    active_license = None
-    active_gate_result = None
-    active_regime = None
-    active_sl_tp = None
+    # Active positions (multi-position tracking)
+    active_positions: dict[str, ActivePosition] = {}  # trade_id -> ActivePosition
 
     logger.info("=" * 60)
     logger.info(f" BTCUSDT Scalping Bot — {'DRY RUN' if dry_run else 'LIVE'}")
@@ -465,6 +528,7 @@ async def run_bot(dry_run: bool = False):
     logger.info(f" FALLBACK_OVERRIDE: {config.ENABLE_FALLBACK_OVERRIDE}")
     logger.info(f" AUTONOMOUS_TUNING: {config.AUTONOMOUS_TUNING_ENABLED}")
     logger.info(f" LEARNING_JOURNAL: {config.LEARNING_JOURNAL_ENABLED}")
+    logger.info(f" MAX_OPEN_POSITIONS: {config.MAX_OPEN_POSITIONS}")
     logger.info("=" * 60)
 
     running = True
@@ -541,109 +605,115 @@ async def run_bot(dry_run: bool = False):
                     f"{paper_tracker.get_summary()}"
                 )
 
-            # ── Update MFE/MAE for active trade ──
-            if active_trade_id:
+            # ── Update MFE/MAE for active positions ──
+            if active_positions:
                 agent.update_price_tick(price)
 
-            # ── Check if active trade hit SL/TP (position monitoring) ──
-            if active_trade_id and not dry_run:
-                try:
-                    session = _get_session()
-                    positions = session.get_positions(
-                        category=config.CATEGORY, symbol=config.SYMBOL
+            # ── Check each active position for SL/TP hit ──
+            closed_ids: list[str] = []
+            for tid, pos in list(active_positions.items()):
+                hit_sl = (price <= pos.sl_price) if pos.direction == "LONG" else (price >= pos.sl_price)
+                hit_tp = (price >= pos.tp_price) if pos.direction == "LONG" else (price <= pos.tp_price)
+
+                if not hit_sl and not hit_tp:
+                    continue
+
+                # Position hit SL or TP — close it
+                exit_price = pos.sl_price if hit_sl else pos.tp_price
+                exit_type = "SL" if hit_sl else "TP"
+
+                if pos.direction == "LONG":
+                    gross_pnl = (exit_price - pos.entry_price) * pos.qty_btc
+                else:
+                    gross_pnl = (pos.entry_price - exit_price) * pos.qty_btc
+
+                fees = abs(gross_pnl) * config.TAKER_FEE_RATE * 2
+                net_pnl = gross_pnl - fees
+                is_win = net_pnl > 0
+
+                # Close partial position on exchange
+                if not dry_run:
+                    close_partial_position(pos.direction, pos.qty_btc)
+
+                # Record close
+                if pos.license and pos.gate_result and pos.regime:
+                    agent.close_trade(
+                        pos.license, pos.gate_result, pos.regime,
+                        candles_1m, exit_price, exit_type,
+                        gross_pnl, fees, net_pnl,
+                        sl_tp=pos.sl_tp,
                     )
-                    pos_list = positions.get("result", {}).get("list", [])
-                    has_position = any(float(p.get("size", 0)) > 0 for p in pos_list)
 
-                    if not has_position:
-                        # Position was closed (SL/TP hit or liquidation)
-                        exit_price = price
-                        if active_direction == "LONG":
-                            gross_pnl = (exit_price - active_entry_price) * (agent.equity * 0.01 / abs(active_entry_price - active_sl_price) if active_sl_price != active_entry_price else 0)
-                        else:
-                            gross_pnl = (active_entry_price - exit_price) * (agent.equity * 0.01 / abs(active_entry_price - active_sl_price) if active_sl_price != active_entry_price else 0)
+                # Update state
+                agent.equity += net_pnl
+                daily_pnl += net_pnl
+                weekly_pnl += net_pnl
+                if agent.equity > peak_equity:
+                    peak_equity = agent.equity
 
-                        fees = abs(gross_pnl) * config.TAKER_FEE_RATE * 2
-                        net_pnl = gross_pnl - fees
-                        is_win = net_pnl > 0
+                if is_win:
+                    consecutive_losses = 0
+                else:
+                    consecutive_losses += 1
 
-                        exit_type = "TP" if is_win else "SL"
+                optimizer.increment_trade_counter()
 
-                        # Record close
-                        if active_license and active_gate_result and active_regime:
-                            agent.close_trade(
-                                active_license, active_gate_result, active_regime,
-                                candles_1m, exit_price, exit_type,
-                                gross_pnl, fees, net_pnl,
-                                sl_tp=active_sl_tp,
-                            )
+                # ── Learning Journal: LLM-powered post-trade reflection ──
+                mfe, mae = agent.data_collector.close_mfe_mae()
+                hold_duration = agent.data_collector.get_hold_duration()
+                await journal.llm_post_trade_reflection(
+                    trade_id=tid,
+                    is_win=is_win,
+                    net_pnl=net_pnl,
+                    entry_quality=pos.license.entry_quality if pos.license else 0,
+                    confidence=pos.license.confidence if pos.license else 0,
+                    regime=pos.license.regime.value if pos.license else "UNKNOWN",
+                    setup_type=pos.license.setup_type.value if pos.license else "NONE",
+                    mfe=mfe,
+                    mae=mae,
+                    hold_sec=hold_duration,
+                )
 
-                        # Update state
-                        agent.equity += net_pnl
-                        daily_pnl += net_pnl
-                        weekly_pnl += net_pnl
-                        if agent.equity > peak_equity:
-                            peak_equity = agent.equity
+                # Deeper loss reflection
+                if not is_win:
+                    sl_dist = abs(pos.entry_price - pos.sl_price) if pos.sl_price else 0
+                    mae_exceeded = mae > sl_dist * 1.1 if sl_dist > 0 else True
+                    journal.record_post_loss_reflection(
+                        trade_id=tid,
+                        net_pnl=net_pnl,
+                        recent_losses=consecutive_losses,
+                        regime=pos.license.regime.value if pos.license else "UNKNOWN",
+                        mae_exceeded_sl=mae_exceeded,
+                    )
 
-                        if is_win:
-                            consecutive_losses = 0
-                        else:
-                            consecutive_losses += 1
+                logger.info(
+                    f"TRADE CLOSED: {exit_type} | {pos.direction} @ {pos.entry_price:.2f} | "
+                    f"PnL=${net_pnl:+.2f} | Equity=${agent.equity:.2f} | "
+                    f"Positions remaining: {len(active_positions) - len(closed_ids) - 1}"
+                )
+                closed_ids.append(tid)
 
-                        optimizer.increment_trade_counter()
+            # Remove closed positions
+            for tid in closed_ids:
+                del active_positions[tid]
 
-                        # ── Learning Journal: LLM-powered post-trade reflection ──
-                        mfe, mae = agent.data_collector.close_mfe_mae()
-                        hold_duration = agent.data_collector.get_hold_duration()
-                        await journal.llm_post_trade_reflection(
-                            trade_id=active_trade_id,
-                            is_win=is_win,
-                            net_pnl=net_pnl,
-                            entry_quality=active_license.entry_quality if active_license else 0,
-                            confidence=active_license.confidence if active_license else 0,
-                            regime=active_license.regime.value if active_license else "UNKNOWN",
-                            setup_type=active_license.setup_type.value if active_license else "NONE",
-                            mfe=mfe,
-                            mae=mae,
-                            hold_sec=hold_duration,
-                        )
+            # Update exchange safety SL if positions remain
+            if closed_ids and active_positions and not dry_run:
+                update_exchange_sl(active_positions)
 
-                        # Deeper loss reflection
-                        if not is_win:
-                            sl_dist = abs(active_entry_price - active_sl_price) if active_sl_price else 0
-                            mae_exceeded = mae > sl_dist * 1.1 if sl_dist > 0 else True
-                            journal.record_post_loss_reflection(
-                                trade_id=active_trade_id,
-                                net_pnl=net_pnl,
-                                recent_losses=consecutive_losses,
-                                regime=active_license.regime.value if active_license else "UNKNOWN",
-                                mae_exceeded_sl=mae_exceeded,
-                            )
-
-                        logger.info(
-                            f"TRADE CLOSED: {exit_type} | {active_direction} | "
-                            f"PnL=${net_pnl:+.2f} | Equity=${agent.equity:.2f}"
-                        )
-
-                        # Clear active trade
-                        active_trade_id = None
-                        active_direction = None
-                        active_entry_price = 0.0
-                        active_sl_price = 0.0
-                        active_tp_price = 0.0
-                        active_license = None
-                        active_gate_result = None
-                        active_regime = None
-                        active_sl_tp = None
-
-                except Exception as e:
-                    logger.error(f"Position check error: {e}")
-
-            # ── Skip if we already have an active trade ──
-            if active_trade_id:
-                logger.info(f"Position open: {active_direction} @ {active_entry_price:.2f} | SL={active_sl_price:.2f} TP={active_tp_price:.2f} — monitoring...")
-                await asyncio.sleep(max(0, LOOP_INTERVAL_SEC - (time.time() - cycle_start)))
-                continue
+            # ── Log active positions status ──
+            if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:
+                for tid, pos in active_positions.items():
+                    unrealized = ((price - pos.entry_price) if pos.direction == "LONG"
+                                  else (pos.entry_price - price)) * pos.qty_btc
+                    logger.info(
+                        f"Position [{tid[:8]}]: {pos.direction} @ {pos.entry_price:.2f} | "
+                        f"SL={pos.sl_price:.2f} TP={pos.tp_price:.2f} | "
+                        f"uPnL=${unrealized:+.2f} — monitoring..."
+                    )
+                if len(active_positions) >= config.MAX_OPEN_POSITIONS:
+                    await asyncio.sleep(max(0, LOOP_INTERVAL_SEC - (time.time() - cycle_start)))
+                    continue
 
             # ── Auto-relax: loosen filters if no trades for too long ──
             mins_since_trade = (time.time() - last_trade_time) / 60
@@ -753,6 +823,21 @@ async def run_bot(dry_run: bool = False):
                     logger.warning(f"Meta-learning error: {e}")
                 last_meta_learning = time.time()
 
+            # ── Record cycle observation to journal (every 5 cycles) ──
+            if cycle % 5 == 0:
+                journal.record_cycle_observation(
+                    cycle=cycle,
+                    price=price,
+                    regime=regime_val,
+                    confidence=license_result.confidence,
+                    entry_quality=license_result.entry_quality,
+                    action=action,
+                    ai_reason=license_result.reason if hasattr(license_result, 'reason') else "",
+                    gate_passed=gate_result.passed,
+                    gate_reasons=gate_result.reasons if hasattr(gate_result, 'reasons') else [],
+                    num_open_positions=len(active_positions),
+                )
+
             # ── Decision: TRADE or WAIT ──
             if gate_result.passed and license_result.is_trade:
                 direction = "LONG" if license_result.action == Action.LONG else "SHORT"
@@ -763,6 +848,16 @@ async def run_bot(dry_run: bool = False):
                 sl_price_calc = (sl_tp.sl_price if sl_tp and hasattr(sl_tp, 'sl_price') else
                                 entry_price * (0.997 if direction == "LONG" else 1.003))
 
+                # Block opposite direction if positions already open
+                if active_positions:
+                    existing_dir = next(iter(active_positions.values())).direction
+                    if direction != existing_dir:
+                        logger.info(
+                            f"DIRECTION CONFLICT: {direction} vs open {existing_dir} — skipping"
+                        )
+                        skip_tracker.record_skip([f"Direction conflict: {direction} vs {existing_dir}"])
+                        continue
+
                 pos_result = calculate_position_size(
                     equity=agent.equity,
                     entry_price=entry_price,
@@ -772,6 +867,7 @@ async def run_bot(dry_run: bool = False):
                     drawdown_pct=drawdown_pct,
                     daily_pnl=daily_pnl,
                     weekly_pnl=weekly_pnl,
+                    current_open_positions=len(active_positions),
                 )
 
                 if pos_result.halted:
@@ -800,19 +896,28 @@ async def run_bot(dry_run: bool = False):
 
                     order = place_order(direction, pos_result.size_usd, price)
                     if order:
-                        active_trade_id = agent.data_collector._active_trade_id or str(uuid.uuid4())
-                        active_direction = direction
-                        active_entry_price = price
-                        active_sl_price = sl_price_calc
-                        active_tp_price = (sl_tp.tp_price if sl_tp and hasattr(sl_tp, 'tp_price') else
-                                          price * (1.005 if direction == "LONG" else 0.995))
-                        active_license = license_result
-                        active_gate_result = gate_result
-                        active_regime = agent.data_collector._last_regime if hasattr(agent.data_collector, '_last_regime') else None
-                        active_sl_tp = sl_tp
+                        trade_id = agent.data_collector._active_trade_id or str(uuid.uuid4())
+                        qty_btc = round(pos_result.size_usd / price, 3)
+                        new_pos = ActivePosition(
+                            trade_id=trade_id,
+                            direction=direction,
+                            entry_price=price,
+                            sl_price=sl_price_calc,
+                            tp_price=tp_price_calc,
+                            qty_btc=qty_btc,
+                            license=license_result,
+                            gate_result=gate_result,
+                            regime=agent.data_collector._last_regime if hasattr(agent.data_collector, '_last_regime') else None,
+                            sl_tp=sl_tp,
+                        )
+                        active_positions[trade_id] = new_pos
 
-                        # Set SL/TP on exchange
-                        set_stop_loss_take_profit(active_sl_price, active_tp_price, direction)
+                        # Set exchange safety SL (widest stop across all positions)
+                        update_exchange_sl(active_positions)
+                        logger.info(
+                            f"Position [{trade_id[:8]}] added | "
+                            f"Total open: {len(active_positions)}/{config.MAX_OPEN_POSITIONS}"
+                        )
                         skip_tracker.record_trade()
                         last_trade_time = time.time()
                         relax_level = 0
@@ -863,8 +968,8 @@ async def run_bot(dry_run: bool = False):
 
     # ── Cleanup ──
     logger.info("Bot stopping — cleaning up...")
-    if active_trade_id and not dry_run:
-        logger.info("Closing active position before shutdown")
+    if active_positions and not dry_run:
+        logger.info(f"Closing {len(active_positions)} active position(s) before shutdown")
         close_all_positions()
 
     journal.close()

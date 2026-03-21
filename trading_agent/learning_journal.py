@@ -176,6 +176,48 @@ class LearningJournal:
         )
 
     # ------------------------------------------------------------------
+    # Cycle observation (records AI analysis every N cycles)
+    # ------------------------------------------------------------------
+
+    def record_cycle_observation(
+        self,
+        cycle: int,
+        price: float,
+        regime: str,
+        confidence: int,
+        entry_quality: int,
+        action: str,
+        ai_reason: str,
+        gate_passed: bool,
+        gate_reasons: list[str],
+        adx: float = 0,
+        chop: float = 0,
+        volume_ratio: float = 0,
+        num_open_positions: int = 0,
+    ) -> int:
+        """Record bot's analysis and thought process every cycle for learning."""
+        observation = (
+            f"Cycle {cycle} | ${price:.0f} | {regime} | "
+            f"ADX={adx:.1f} CHOP={chop:.1f} Vol={volume_ratio:.2f}x | "
+            f"Open positions: {num_open_positions}\n"
+            f"AI decision: {action} (conf={confidence}, quality={entry_quality})\n"
+            f"AI reasoning: {ai_reason[:300]}"
+        )
+
+        if gate_passed:
+            conclusion = f"Signal PASSED gates — {action} executed"
+        else:
+            conclusion = f"Signal BLOCKED: {'; '.join(gate_reasons[:3])}"
+
+        return self._insert(
+            entry_type="CYCLE_OBSERVATION",
+            trigger=f"Cycle {cycle}: {action} @ ${price:.0f}",
+            observation=observation,
+            conclusion=conclusion,
+            confidence=confidence,
+        )
+
+    # ------------------------------------------------------------------
     # Skip review
     # ------------------------------------------------------------------
 
@@ -293,7 +335,7 @@ class LearningJournal:
         hold_sec: int = 0,
         similar_trades_summary: str = "",
     ) -> int:
-        """Use LLM for deeper post-trade analysis."""
+        """Use LLM for deeper post-trade analysis with full AI thought process."""
         if not config.ANTHROPIC_API_KEY:
             return self.record_post_trade(
                 trade_id, is_win, net_pnl, entry_quality, confidence,
@@ -301,18 +343,58 @@ class LearningJournal:
             )
 
         outcome = "WIN" if is_win else "LOSS"
+
+        # Gather recent journal context for pattern recognition
+        recent_context = ""
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT entry_type, observation, conclusion FROM learning_journal "
+                "ORDER BY id DESC LIMIT 10"
+            ).fetchall()
+            if rows:
+                recent_context = "\n".join(
+                    f"  [{r[0]}] {(r[1] or '')[:80]} -> {(r[2] or '')[:80]}"
+                    for r in rows
+                )
+        except Exception:
+            pass
+
+        # Calculate derived metrics
+        rr_ratio = abs(mfe / mae) if mae > 0 else 0
+        efficiency = (abs(net_pnl) / mfe * 100) if mfe > 0 else 0
+
         prompt = (
-            f"Trade closed: {outcome} ${net_pnl:+.2f} | {hold_sec}s hold | "
-            f"Quality {entry_quality} | Confidence {confidence}\n"
-            f"Regime: {regime} | Setup: {setup_type}\n"
-            f"MFE: ${mfe:.1f} | MAE: ${mae:.1f}\n"
+            f"=== TRADE RESULT ===\n"
+            f"Trade ID: {trade_id}\n"
+            f"Outcome: {outcome} | PnL: ${net_pnl:+.2f}\n"
+            f"Hold time: {hold_sec}s | Entry quality: {entry_quality}/100 | AI confidence: {confidence}/100\n"
+            f"Regime: {regime} | Setup type: {setup_type}\n"
+            f"MFE (max favorable): ${mfe:.2f} | MAE (max adverse): ${mae:.2f}\n"
+            f"R:R achieved: {rr_ratio:.2f} | Capture efficiency: {efficiency:.0f}%\n"
         )
         if similar_trades_summary:
-            prompt += f"Recent similar trades: {similar_trades_summary}\n"
+            prompt += f"\nSimilar recent trades:\n{similar_trades_summary}\n"
+        if recent_context:
+            prompt += f"\nRecent journal entries:\n{recent_context}\n"
+
         prompt += (
-            "Respond JSON only: {\"observation\": \"...\", \"conclusion\": \"...\", "
-            "\"suggested_action\": \"...\", \"confidence_in_conclusion\": 0-100}\n"
-            "Max 3 sentences total. Be specific and actionable."
+            "\n=== INSTRUCTIONS ===\n"
+            "Think deeply about this trade. Write your full thought process.\n"
+            "Respond JSON:\n"
+            "{\n"
+            '  "thoughts": "Your internal reasoning process — what you notice, '
+            'what patterns you see, what concerns you, hypotheses about market behavior...",\n'
+            '  "observation": "Factual analysis of trade execution and result",\n'
+            '  "conclusion": "What this trade teaches us — be specific about entry timing, '
+            'regime fit, position management",\n'
+            '  "pattern_detected": "Any recurring pattern you notice across recent trades '
+            '(or null if none)",\n'
+            '  "suggested_action": "Concrete parameter adjustment or behavioral change",\n'
+            '  "confidence_in_conclusion": 0-100,\n'
+            '  "self_grade": "A/B/C/D/F grade for this trade decision"\n'
+            "}\n"
+            "Be thorough. 5-8 sentences for thoughts. Be specific and actionable."
         )
 
         try:
@@ -320,8 +402,15 @@ class LearningJournal:
             client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
             response = client.messages.create(
                 model=config.LLM_MODEL,
-                max_tokens=150,
-                system="You are a trading performance analyst. Analyze trade outcomes and find patterns. Be concise and actionable.",
+                max_tokens=500,
+                system=(
+                    "You are an elite trading performance analyst and AI trading coach. "
+                    "You analyze every trade deeply — entry quality, timing, regime fit, "
+                    "risk management, and execution. You think out loud, share your "
+                    "internal reasoning, and find patterns across trades. "
+                    "You grade each trade honestly and suggest specific improvements. "
+                    "Write your thoughts as if journaling your analysis process."
+                ),
                 messages=[{"role": "user", "content": prompt}],
             )
             text = response.content[0].text.strip()
@@ -330,14 +419,25 @@ class LearningJournal:
                 text = "\n".join(l for l in lines if not l.strip().startswith("```"))
 
             data = json.loads(text)
+
+            # Build rich observation with AI thoughts
+            thoughts = data.get("thoughts", "")
+            pattern = data.get("pattern_detected", "")
+            grade = data.get("self_grade", "?")
+            observation_full = (
+                f"[Grade: {grade}] {data.get('observation', '')}\n"
+                f"[AI Thoughts] {thoughts}\n"
+                f"[Pattern] {pattern or 'None detected'}"
+            )
+
             return self._insert(
                 entry_type="POST_WIN" if is_win else "POST_LOSS",
                 trade_id=trade_id,
-                trigger=f"Trade {trade_id}: {outcome} ${net_pnl:+.2f}",
-                observation=data.get("observation", "")[:300],
-                conclusion=data.get("conclusion", "")[:300],
+                trigger=f"Trade {trade_id}: {outcome} ${net_pnl:+.2f} | Q={entry_quality} C={confidence} | {regime}/{setup_type} | R:R={rr_ratio:.1f}",
+                observation=observation_full[:600],
+                conclusion=data.get("conclusion", "")[:400],
                 confidence=int(data.get("confidence_in_conclusion", 60)),
-                suggested_action=data.get("suggested_action", "")[:200],
+                suggested_action=data.get("suggested_action", "")[:300],
             )
         except Exception as e:
             logger.warning(f"LLM post-trade reflection failed: {e}")
