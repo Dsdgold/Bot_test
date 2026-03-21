@@ -308,6 +308,101 @@ class SkipTracker:
         self.reasons.clear()
 
 
+class PaperTradeTracker:
+    """Track 'what if I had traded?' simulations for every signal."""
+
+    def __init__(self):
+        self.pending: list[dict] = []  # Open paper trades
+        self.completed: list[dict] = []
+        self.total_paper_pnl = 0.0
+        self.paper_wins = 0
+        self.paper_losses = 0
+
+    def open_paper_trade(self, direction: str, entry_price: float,
+                         sl_price: float, tp_price: float,
+                         confidence: int, quality: int, regime: str,
+                         was_blocked: bool, block_reason: str = ""):
+        """Record a hypothetical trade entry."""
+        self.pending.append({
+            "direction": direction,
+            "entry_price": entry_price,
+            "sl_price": sl_price,
+            "tp_price": tp_price,
+            "confidence": confidence,
+            "quality": quality,
+            "regime": regime,
+            "was_blocked": was_blocked,
+            "block_reason": block_reason,
+            "open_time": time.time(),
+            "mfe": 0.0,
+            "mae": 0.0,
+        })
+
+    def update_prices(self, current_price: float) -> list[dict]:
+        """Update all pending paper trades with current price. Returns closed trades."""
+        closed = []
+        still_open = []
+
+        for pt in self.pending:
+            # Update MFE/MAE
+            if pt["direction"] == "LONG":
+                unrealized = current_price - pt["entry_price"]
+            else:
+                unrealized = pt["entry_price"] - current_price
+
+            if unrealized > pt["mfe"]:
+                pt["mfe"] = unrealized
+            if unrealized < 0 and abs(unrealized) > pt["mae"]:
+                pt["mae"] = abs(unrealized)
+
+            # Check SL/TP hit
+            hit_tp = False
+            hit_sl = False
+            if pt["direction"] == "LONG":
+                hit_tp = current_price >= pt["tp_price"]
+                hit_sl = current_price <= pt["sl_price"]
+            else:
+                hit_tp = current_price <= pt["tp_price"]
+                hit_sl = current_price >= pt["sl_price"]
+
+            # Timeout after 30 min
+            timed_out = (time.time() - pt["open_time"]) > 1800
+
+            if hit_tp or hit_sl or timed_out:
+                if hit_tp:
+                    pt["exit_type"] = "TP"
+                    pt["pnl"] = abs(pt["tp_price"] - pt["entry_price"])
+                elif hit_sl:
+                    pt["exit_type"] = "SL"
+                    pt["pnl"] = -abs(pt["sl_price"] - pt["entry_price"])
+                else:
+                    pt["exit_type"] = "TIMEOUT"
+                    pt["pnl"] = unrealized
+
+                pt["hold_sec"] = int(time.time() - pt["open_time"])
+                pt["exit_price"] = current_price
+                self.total_paper_pnl += pt["pnl"]
+                if pt["pnl"] > 0:
+                    self.paper_wins += 1
+                else:
+                    self.paper_losses += 1
+                closed.append(pt)
+                self.completed.append(pt)
+            else:
+                still_open.append(pt)
+
+        self.pending = still_open
+        return closed
+
+    def get_summary(self) -> str:
+        total = self.paper_wins + self.paper_losses
+        wr = (self.paper_wins / total * 100) if total > 0 else 0
+        return (
+            f"Paper trades: {total} ({self.paper_wins}W/{self.paper_losses}L) "
+            f"WR={wr:.0f}% PnL=${self.total_paper_pnl:.2f}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Main bot loop
 # ---------------------------------------------------------------------------
@@ -324,6 +419,7 @@ async def run_bot(dry_run: bool = False):
     journal = LearningJournal()
     optimizer = SelfOptimizer()
     skip_tracker = SkipTracker()
+    paper_tracker = PaperTradeTracker()
 
     # Fetch initial equity from Bybit
     initial_equity = await fetch_account_equity()
@@ -414,6 +510,34 @@ async def run_bot(dry_run: bool = False):
 
             market = await fetch_market_data()
             price = candles_1m[-1].close
+
+            # ── Update paper trades with current price ──
+            paper_closed = paper_tracker.update_prices(price)
+            for pt in paper_closed:
+                won = "WIN" if pt["pnl"] > 0 else "LOSS"
+                blocked = " (was BLOCKED)" if pt["was_blocked"] else ""
+                journal._insert(
+                    entry_type="POST_SKIP_REVIEW",
+                    trigger=f"Paper trade {pt['exit_type']}",
+                    observation=(
+                        f"WHAT-IF {pt['direction']}{blocked}: entry=${pt['entry_price']:.0f} "
+                        f"exit=${pt['exit_price']:.0f} → {won} ${pt['pnl']:+.1f} "
+                        f"in {pt['hold_sec']}s | MFE=${pt['mfe']:.1f} MAE=${pt['mae']:.1f} | "
+                        f"conf={pt['confidence']} quality={pt['quality']} regime={pt['regime']}"
+                    ),
+                    conclusion=(
+                        f"{'Would have won' if pt['pnl'] > 0 else 'Saved money by skipping'}"
+                        f"{' — filter was correct' if pt['pnl'] <= 0 and pt['was_blocked'] else ''}"
+                        f"{' — MISSED OPPORTUNITY' if pt['pnl'] > 0 and pt['was_blocked'] else ''}"
+                    ),
+                    confidence=80,
+                    suggested_action=f"Block reason: {pt['block_reason']}" if pt['was_blocked'] else "",
+                )
+                logger.info(
+                    f"PAPER {won}: {pt['direction']} ${pt['pnl']:+.1f} "
+                    f"({pt['exit_type']} in {pt['hold_sec']}s){blocked} | "
+                    f"{paper_tracker.get_summary()}"
+                )
 
             # ── Update MFE/MAE for active trade ──
             if active_trade_id:
@@ -654,10 +778,34 @@ async def run_bot(dry_run: bool = False):
                         skip_tracker.record_skip(["Order failed"])
             else:
                 skip_tracker.record_skip(gate_result.reasons if gate_result.reasons else ["WAIT"])
-                if cycle % 10 == 0:  # Log WAIT every 10 cycles to reduce noise
+
+                # ── Paper trade: "what if I had traded?" ──
+                if license_result.is_trade and license_result.confidence >= 30:
+                    direction = "LONG" if license_result.action == Action.LONG else "SHORT"
+                    entry_p = price
+                    atr_val = abs(price * 0.003)  # ~0.3% as rough ATR
+                    sl_p = entry_p - atr_val if direction == "LONG" else entry_p + atr_val
+                    tp_p = entry_p + atr_val * 1.5 if direction == "LONG" else entry_p - atr_val * 1.5
+                    paper_tracker.open_paper_trade(
+                        direction=direction, entry_price=entry_p,
+                        sl_price=sl_p, tp_price=tp_p,
+                        confidence=license_result.confidence,
+                        quality=license_result.entry_quality,
+                        regime=regime_val,
+                        was_blocked=True,
+                        block_reason="; ".join(gate_result.reasons[:2]) if gate_result.reasons else "AI WAIT",
+                    )
+                    logger.info(
+                        f"PAPER OPEN: {direction} @ ${price:.0f} "
+                        f"(SL=${sl_p:.0f} TP=${tp_p:.0f}) — blocked by: "
+                        f"{gate_result.reasons[0] if gate_result.reasons else 'AI WAIT'}"
+                    )
+
+                if cycle % 10 == 0:
                     logger.info(
                         f"Cycle {cycle}: WAIT | ${price:.0f} | "
-                        f"regime={regime_val} conf={license_result.confidence}"
+                        f"regime={regime_val} conf={license_result.confidence} | "
+                        f"{paper_tracker.get_summary()}"
                     )
 
         except Exception as e:
