@@ -46,7 +46,7 @@ class TradingConfig:
     # Timing
     candle_interval: str = "Min1"
     analysis_interval: int = 60  # Every 60 seconds — save API costs with Sonnet
-    cooldown_after_trade: int = 120  # Wait 120s between trades to avoid overtrading
+    cooldown_after_trade: int = int(os.getenv("COOLDOWN_AFTER_TRADE", "300"))  # 5 min cooldown to avoid overtrading
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
@@ -63,7 +63,17 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "40"))
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "70"))
+
+    # Require strategy and AI to agree on direction (reduces conflicting trades)
+    require_signal_agreement: bool = os.getenv("REQUIRE_SIGNAL_AGREEMENT", "true").lower() == "true"
+
+    # Minimum AI grade to open a trade (A+, A, B, C, D)
+    min_ai_grade: str = os.getenv("MIN_AI_GRADE", "B")
+
+    # Choppy market detection — skip trading if signals flipped too many times recently
+    max_signal_flips: int = int(os.getenv("MAX_SIGNAL_FLIPS", "4"))  # Max direction changes in last 10 signals
+    signal_flip_window: int = int(os.getenv("SIGNAL_FLIP_WINDOW", "10"))  # How many recent signals to check
 
     # Minimum hold time in seconds — prevent closing trades too early
     min_hold_time: int = int(os.getenv("MIN_HOLD_TIME", "120"))
