@@ -150,7 +150,7 @@ DD_HALT_PCT = float(os.getenv("DD_HALT_PCT", "10.0"))
 # --- Capital protection ---
 DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "3.0"))
 WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "7.0"))
-EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "500"))
+EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "10"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
 
 # --- Token optimization ---
