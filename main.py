@@ -37,6 +37,38 @@ LOOP_INTERVAL_SEC = 60  # 1-minute candle cycle
 
 
 # ---------------------------------------------------------------------------
+# Shared state for dashboard (module-level, thread-safe reads)
+# ---------------------------------------------------------------------------
+_shared_positions: list[dict] = []  # Updated by bot loop, read by dashboard
+
+
+def get_shared_positions() -> list[dict]:
+    """Return a snapshot of bot's internal positions for the dashboard."""
+    return list(_shared_positions)
+
+
+def _sync_shared_positions(active_positions: dict, current_price: float = 0) -> None:
+    """Update the shared state with current active positions."""
+    global _shared_positions
+    snapshot = []
+    for tid, pos in active_positions.items():
+        unrealized = ((current_price - pos.entry_price) if pos.direction == "LONG"
+                      else (pos.entry_price - current_price)) * pos.qty_btc if current_price else 0
+        snapshot.append({
+            "trade_id": tid[:8],
+            "side": "Buy" if pos.direction == "LONG" else "Sell",
+            "direction": pos.direction,
+            "size": pos.qty_btc,
+            "entry_price": pos.entry_price,
+            "sl_price": pos.sl_price,
+            "tp_price": pos.tp_price,
+            "unrealised_pnl": round(unrealized, 4),
+            "opened_at": pos.opened_at,
+        })
+    _shared_positions = snapshot
+
+
+# ---------------------------------------------------------------------------
 # Multi-position tracking
 # ---------------------------------------------------------------------------
 
@@ -345,7 +377,11 @@ def update_exchange_sl(positions: dict[str, ActivePosition]) -> None:
         )
         logger.info(f"Exchange safety SL updated: ${widest_sl:.2f}")
     except Exception as e:
-        logger.error(f"Exchange SL update error: {e}")
+        err_str = str(e)
+        if "34040" in err_str or "not modified" in err_str.lower():
+            logger.debug(f"Exchange SL unchanged (same value): ${widest_sl:.2f}")
+        else:
+            logger.error(f"Exchange SL update error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -697,6 +733,8 @@ async def run_bot(dry_run: bool = False):
             # Remove closed positions
             for tid in closed_ids:
                 del active_positions[tid]
+            if closed_ids:
+                _sync_shared_positions(active_positions, price)
 
             # Update exchange safety SL if positions remain
             if closed_ids and active_positions and not dry_run:
@@ -704,6 +742,7 @@ async def run_bot(dry_run: bool = False):
 
             # ── Log active positions status ──
             if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:
+                _sync_shared_positions(active_positions, price)
                 for tid, pos in active_positions.items():
                     unrealized = ((price - pos.entry_price) if pos.direction == "LONG"
                                   else (pos.entry_price - price)) * pos.qty_btc
@@ -918,6 +957,7 @@ async def run_bot(dry_run: bool = False):
 
                         # Set exchange safety SL (widest stop across all positions)
                         update_exchange_sl(active_positions)
+                        _sync_shared_positions(active_positions, price)
                         logger.info(
                             f"Position [{trade_id[:8]}] added | "
                             f"Total open: {len(active_positions)}/{config.MAX_OPEN_POSITIONS}"

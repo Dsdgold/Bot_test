@@ -319,6 +319,15 @@ def create_app() -> "FastAPI":
         except Exception as e:
             return {"positions": [], "error": str(e)}
 
+    @app.get("/api/bot-positions")
+    async def bot_positions():
+        """Return bot's internal position tracking (more detailed than exchange API)."""
+        try:
+            from main import get_shared_positions
+            return {"positions": get_shared_positions()}
+        except Exception as e:
+            return {"positions": [], "error": str(e)}
+
     # ── Frontend ────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)
@@ -584,11 +593,12 @@ async function refreshChart(){
 // ── Live Monitor refresh ──
 async function refresh(){
   try{
-    const [status,journal,bal,pos] = await Promise.all([
+    const [status,journal,bal,pos,botPos] = await Promise.all([
       fetch('/api/status').then(r=>r.json()),
       fetch('/api/journal?limit=12').then(r=>r.json()),
       fetch('/api/balance').then(r=>r.json()),
       fetch('/api/positions').then(r=>r.json()),
+      fetch('/api/bot-positions').then(r=>r.json()),
     ]);
     // Balance from Bybit
     if(bal.equity>0){
@@ -636,14 +646,13 @@ async function refresh(){
         (conc?' &mdash; <em>'+conc+'</em>':'')+'</div>';
     }).join('');
 
-    // Open positions (live from Bybit)
+    // Open positions (live from Bybit, with bot internal fallback)
     const posDiv = document.getElementById('openPositions');
     const positions = pos.positions||[];
+    const botPositions = botPos.positions||[];
     if(posDiv){
-      if(positions.length===0){
-        posDiv.innerHTML='<div style="color:#666;padding:4px">No open positions</div>';
-        document.getElementById('posStatus').textContent='Position: FLAT';
-      } else {
+      if(positions.length>0){
+        // Exchange positions available — show them
         posDiv.innerHTML = positions.map(p=>{
           const pnl = p.unrealised_pnl||0;
           const cls = pnl>=0?'td-pos':'td-neg';
@@ -669,6 +678,31 @@ async function refresh(){
         const pnl0=p0.unrealised_pnl||0;
         document.getElementById('posStatus').textContent=s0+' '+p0.size+' BTC | PnL: $'+pnl0.toFixed(2);
         document.getElementById('posStatus').style.color=pnl0>=0?'#00ff88':'#ff4444';
+      } else if(botPositions.length>0){
+        // Fallback: show bot's internal positions
+        const totalPnl = botPositions.reduce((s,p)=>s+(p.unrealised_pnl||0),0);
+        posDiv.innerHTML = botPositions.map(p=>{
+          const pnl = p.unrealised_pnl||0;
+          const cls = pnl>=0?'td-pos':'td-neg';
+          const side = p.direction||'SHORT';
+          const sideClr = side==='LONG'?'#00cc55':'#cc3333';
+          return '<div style="background:#111;padding:8px;border-radius:4px;margin:4px 0;border-left:3px solid '+sideClr+'">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="color:'+sideClr+';font-weight:bold;font-size:13px">'+side+' '+p.size+' BTC <span style="color:#555;font-size:10px">['+p.trade_id+']</span></span>'+
+            '<span class="'+cls+'" style="font-size:14px;font-weight:bold">$'+pnl.toFixed(4)+'</span>'+
+            '</div>'+
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;color:#888;font-size:10px">'+
+            '<span>Entry: $'+p.entry_price.toFixed(1)+'</span>'+
+            '<span>SL: $'+p.sl_price.toFixed(1)+'</span>'+
+            '<span>TP: $'+p.tp_price.toFixed(1)+'</span>'+
+            '</div></div>';
+        }).join('');
+        const s0=botPositions[0].direction||'SHORT';
+        document.getElementById('posStatus').textContent=s0+' '+botPositions.length+'x | PnL: $'+totalPnl.toFixed(2);
+        document.getElementById('posStatus').style.color=totalPnl>=0?'#00ff88':'#ff4444';
+      } else {
+        posDiv.innerHTML='<div style="color:#666;padding:4px">No open positions</div>';
+        document.getElementById('posStatus').textContent='Position: FLAT';
       }
     }
 
