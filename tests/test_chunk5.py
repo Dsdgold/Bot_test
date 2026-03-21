@@ -230,12 +230,12 @@ def test_6_weekly_loss_halts():
 def test_7_equity_floor():
     """Test 7: Equity floor circuit breaker."""
     r = calculate_position_size(
-        equity=400, entry_price=100000, sl_price=99650,
+        equity=5, entry_price=100000, sl_price=99650,
         entry_quality=85,
     )
     assert r.halted, "Below equity floor should halt"
     assert "floor" in r.halt_reason.lower()
-    print(f"  PASS: Equity $400 < floor ${config.EQUITY_FLOOR_USDT} → HALT")
+    print(f"  PASS: Equity $5 < floor ${config.EQUITY_FLOOR_USDT} → HALT")
 
 
 def test_8_max_leverage_cap():
