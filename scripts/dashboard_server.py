@@ -281,6 +281,44 @@ def create_app() -> "FastAPI":
         except Exception as e:
             return {"equity": 0, "error": str(e)}
 
+    @app.get("/api/positions")
+    async def positions():
+        """Fetch open positions from Bybit — live PnL."""
+        if not config.BYBIT_API_KEY:
+            return {"positions": [], "error": "No API keys"}
+        try:
+            from pybit.unified_trading import HTTP
+            session = HTTP(
+                testnet=config.BYBIT_TESTNET,
+                api_key=config.BYBIT_API_KEY,
+                api_secret=config.BYBIT_API_SECRET,
+            )
+            result = session.get_positions(category=config.CATEGORY, symbol=config.SYMBOL)
+            pos_list = result.get("result", {}).get("list", [])
+            out = []
+            for p in pos_list:
+                size = float(p.get("size", 0))
+                if size <= 0:
+                    continue
+                out.append({
+                    "side": p.get("side", ""),
+                    "size": size,
+                    "size_usd": float(p.get("positionValue", 0)),
+                    "entry_price": float(p.get("avgPrice", 0)),
+                    "mark_price": float(p.get("markPrice", 0)),
+                    "liq_price": float(p.get("liqPrice", 0)),
+                    "unrealised_pnl": float(p.get("unrealisedPnl", 0)),
+                    "realised_pnl": float(p.get("cumRealisedPnl", 0)),
+                    "leverage": p.get("leverage", "1"),
+                    "stop_loss": float(p.get("stopLoss", 0)),
+                    "take_profit": float(p.get("takeProfit", 0)),
+                    "pnl_pct": float(p.get("unrealisedPnl", 0)) / float(p.get("positionValue", 1)) * 100 if float(p.get("positionValue", 0)) > 0 else 0,
+                    "created_time": p.get("createdTime", ""),
+                })
+            return {"positions": out}
+        except Exception as e:
+            return {"positions": [], "error": str(e)}
+
     # ── Frontend ────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)
@@ -404,6 +442,10 @@ table.data tr:hover{background:#111}
         <button class="btn btn-close" onclick="manualAction('close-all')">CLOSE NOW</button>
       </div>
       <div class="pos-status" id="posStatus">Position: FLAT</div>
+    </div>
+    <div style="margin-top:8px">
+      <h3>Open Positions</h3>
+      <div id="openPositions" style="font-size:11px"></div>
     </div>
     <div style="margin-top:8px">
       <h3>Performance</h3>
@@ -531,10 +573,11 @@ async function refreshChart(){
 // ── Live Monitor refresh ──
 async function refresh(){
   try{
-    const [status,journal,bal] = await Promise.all([
+    const [status,journal,bal,pos] = await Promise.all([
       fetch('/api/status').then(r=>r.json()),
       fetch('/api/journal?limit=12').then(r=>r.json()),
       fetch('/api/balance').then(r=>r.json()),
+      fetch('/api/positions').then(r=>r.json()),
     ]);
     // Balance from Bybit
     if(bal.equity>0){
@@ -574,6 +617,42 @@ async function refresh(){
         '<span class="'+cls+'">'+label+'</span> '+obs+
         (conc?' &mdash; <em>'+conc+'</em>':'')+'</div>';
     }).join('');
+
+    // Open positions (live from Bybit)
+    const posDiv = document.getElementById('openPositions');
+    const positions = pos.positions||[];
+    if(posDiv){
+      if(positions.length===0){
+        posDiv.innerHTML='<div style="color:#666;padding:4px">No open positions</div>';
+        document.getElementById('posStatus').textContent='Position: FLAT';
+      } else {
+        posDiv.innerHTML = positions.map(p=>{
+          const pnl = p.unrealised_pnl||0;
+          const cls = pnl>=0?'td-pos':'td-neg';
+          const pnlPct = p.pnl_pct||0;
+          const side = p.side==='Buy'?'LONG':'SHORT';
+          const sideClr = side==='LONG'?'#00cc55':'#cc3333';
+          return '<div style="background:#111;padding:8px;border-radius:4px;margin:4px 0;border-left:3px solid '+sideClr+'">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="color:'+sideClr+';font-weight:bold;font-size:13px">'+side+' '+p.size+' BTC</span>'+
+            '<span class="'+cls+'" style="font-size:14px;font-weight:bold">$'+pnl.toFixed(2)+' ('+pnlPct.toFixed(2)+'%)</span>'+
+            '</div>'+
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;color:#888;font-size:10px">'+
+            '<span>Entry: $'+p.entry_price.toFixed(1)+'</span>'+
+            '<span>Mark: $'+p.mark_price.toFixed(1)+'</span>'+
+            '<span>Lev: '+p.leverage+'x</span>'+
+            '<span>SL: $'+(p.stop_loss||0).toFixed(1)+'</span>'+
+            '<span>TP: $'+(p.take_profit||0).toFixed(1)+'</span>'+
+            '<span>Liq: $'+(p.liq_price||0).toFixed(0)+'</span>'+
+            '</div></div>';
+        }).join('');
+        const p0=positions[0];
+        const s0=p0.side==='Buy'?'LONG':'SHORT';
+        const pnl0=p0.unrealised_pnl||0;
+        document.getElementById('posStatus').textContent=s0+' '+p0.size+' BTC | PnL: $'+pnl0.toFixed(2);
+        document.getElementById('posStatus').style.color=pnl0>=0?'#00ff88':'#ff4444';
+      }
+    }
 
     // Today stats
     const t = status.today||{};
