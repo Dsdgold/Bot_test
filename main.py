@@ -553,7 +553,10 @@ async def run_bot(dry_run: bool = False):
             )
             logger.info(f"Leverage set to {config.MAX_LEVERAGE}x on Bybit")
         except Exception as e:
-            logger.warning(f"Could not set leverage: {e}")
+            if "11043" in str(e):
+                logger.info(f"Leverage already set to {config.MAX_LEVERAGE}x (or position open)")
+            else:
+                logger.warning(f"Could not set leverage: {e}")
 
     # Fetch initial equity from Bybit
     initial_equity = await fetch_account_equity()

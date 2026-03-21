@@ -72,8 +72,8 @@ TIER_2_PARAMS = [
     ParamSpec("TARGET_RR_A_PLUS", 2, 1.2, 2.5, 0.15, "TARGET_RR_A_PLUS"),
     ParamSpec("TARGET_RR_A", 2, 1.0, 2.0, 0.1, "TARGET_RR_A"),
     ParamSpec("ATR_STOP_MULT", 2, 0.7, 1.5, 0.1, "ATR_STOP_MULT"),
-    ParamSpec("MIN_NET_RR", 2, 1.0, 1.5, 0.05, "MIN_NET_RR"),
-    ParamSpec("BASE_RISK_PER_TRADE_PCT", 2, 0.5, 5.0, 0.5, "BASE_RISK_PER_TRADE_PCT"),
+    ParamSpec("MIN_NET_RR", 2, 0.3, 1.0, 0.05, "MIN_NET_RR"),
+    ParamSpec("BASE_RISK_PER_TRADE_PCT", 2, 5.0, 15.0, 1.0, "BASE_RISK_PER_TRADE_PCT"),
     ParamSpec("REVERSAL_QUALITY_MIN", 2, 70, 95, 3, "REVERSAL_QUALITY_MIN", True),
 ]
 
