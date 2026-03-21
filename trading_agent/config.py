@@ -107,6 +107,52 @@ EQUITY_SNAPSHOT_INTERVAL_SEC = int(os.getenv("EQUITY_SNAPSHOT_INTERVAL_SEC", "90
 ENABLE_MFE_MAE_TRACKING = os.getenv("ENABLE_MFE_MAE_TRACKING", "true").lower() == "true"
 DB_PATH = os.getenv("DB_PATH", "bot_data.db")
 
+# --- Analytics engine ---
+AUTO_ANALYTICS_ENABLED = os.getenv("AUTO_ANALYTICS_ENABLED", "true").lower() == "true"
+ANALYTICS_RUN_INTERVAL_HOURS = int(os.getenv("ANALYTICS_RUN_INTERVAL_HOURS", "24"))
+MIN_SAMPLE_FOR_RECOMMENDATIONS = int(os.getenv("MIN_SAMPLE_FOR_RECOMMENDATIONS", "50"))
+EDGE_DECAY_WINDOW_TRADES = int(os.getenv("EDGE_DECAY_WINDOW_TRADES", "30"))
+EDGE_DECAY_ALERT_THRESHOLD = float(os.getenv("EDGE_DECAY_ALERT_THRESHOLD", "0.50"))
+FEE_EROSION_ALERT_THRESHOLD = float(os.getenv("FEE_EROSION_ALERT_THRESHOLD", "0.40"))
+SKIP_RATE_ALERT_THRESHOLD = float(os.getenv("SKIP_RATE_ALERT_THRESHOLD", "0.95"))
+SKIP_RATE_ALERT_HOURS = int(os.getenv("SKIP_RATE_ALERT_HOURS", "4"))
+
+# --- Position sizing ---
+POSITION_SIZING_MODE = os.getenv("POSITION_SIZING_MODE", "fixed_fractional")
+BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "1.0"))
+MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "2.0"))
+QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "1.5"))
+QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.2"))
+QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.0"))
+STREAK_LOSS_REDUCTION_1 = float(os.getenv("STREAK_LOSS_REDUCTION_1", "0.75"))
+STREAK_LOSS_REDUCTION_2 = float(os.getenv("STREAK_LOSS_REDUCTION_2", "0.50"))
+STREAK_LOSS_REDUCTION_3 = float(os.getenv("STREAK_LOSS_REDUCTION_3", "0.25"))
+
+# --- Growth tiers ---
+TIER_1_EQUITY = float(os.getenv("TIER_1_EQUITY", "1000"))
+TIER_1_RISK_PCT = float(os.getenv("TIER_1_RISK_PCT", "1.0"))
+TIER_2_EQUITY = float(os.getenv("TIER_2_EQUITY", "2500"))
+TIER_2_RISK_PCT = float(os.getenv("TIER_2_RISK_PCT", "1.25"))
+TIER_3_EQUITY = float(os.getenv("TIER_3_EQUITY", "5000"))
+TIER_3_RISK_PCT = float(os.getenv("TIER_3_RISK_PCT", "1.5"))
+TIER_4_EQUITY = float(os.getenv("TIER_4_EQUITY", "10000"))
+TIER_4_RISK_PCT = float(os.getenv("TIER_4_RISK_PCT", "1.75"))
+
+# --- Drawdown tiers ---
+DD_TIER_1_PCT = float(os.getenv("DD_TIER_1_PCT", "3.0"))
+DD_TIER_1_MULT = float(os.getenv("DD_TIER_1_MULT", "0.70"))
+DD_TIER_2_PCT = float(os.getenv("DD_TIER_2_PCT", "5.0"))
+DD_TIER_2_MULT = float(os.getenv("DD_TIER_2_MULT", "0.40"))
+DD_TIER_3_PCT = float(os.getenv("DD_TIER_3_PCT", "8.0"))
+DD_TIER_3_MULT = float(os.getenv("DD_TIER_3_MULT", "0.20"))
+DD_HALT_PCT = float(os.getenv("DD_HALT_PCT", "10.0"))
+
+# --- Capital protection ---
+DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "3.0"))
+WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "7.0"))
+EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "500"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
+
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
 MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "10"))
