@@ -1,10 +1,18 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-playwright==1.49.1
-httpx==0.28.1
-beautifulsoup4==4.12.3
-lxml==5.3.0
-fake-useragent==2.0.3
-python-multipart==0.0.20
-aiofiles==24.1.0
-pydantic==2.10.4
+# Trading bot core
+python-dotenv>=1.0.0
+anthropic>=0.40.0
+pybit>=5.8.0
+
+# Web dashboard
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# Data & analysis
+pydantic>=2.10.0
+
+# Scraper (legacy — kept for backward compatibility)
+httpx>=0.28.0
+beautifulsoup4>=4.12.0
+lxml>=5.3.0
+aiofiles>=24.1.0
+python-multipart>=0.0.20
