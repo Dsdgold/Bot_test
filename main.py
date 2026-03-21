@@ -741,15 +741,16 @@ async def run_bot(dry_run: bool = False):
             for tid in closed_ids:
                 del active_positions[tid]
             if closed_ids:
-                _sync_shared_positions(active_positions, price)
+                _sync_shared_positions(active_positions, price)  # Update after closes (may be empty now)
 
             # Update exchange safety SL if positions remain
             if closed_ids and active_positions and not dry_run:
                 update_exchange_sl(active_positions)
 
             # ── Log active positions status ──
-            if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:
+            if active_positions:
                 _sync_shared_positions(active_positions, price)
+            if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:
                 for tid, pos in active_positions.items():
                     unrealized = ((price - pos.entry_price) if pos.direction == "LONG"
                                   else (pos.entry_price - price)) * pos.qty_btc
