@@ -299,22 +299,11 @@ def evaluate_entry_gates(
             f"Entry quality {license.entry_quality} < {quality_min}"
         )
 
-    # Gate 1: Regime filter (deterministic, cannot be overridden)
+    # Gate 1: Regime filter — only block DEAD_LOW_VOL (no liquidity)
     if config.REGIME_FILTER_ENABLED:
-        if regime.regime == Regime.RANGING:
-            result.regime_ok = False
-            result.add_block(f"RANGING regime blocks all entries: {regime.details}")
-        elif regime.regime == Regime.DEAD_LOW_VOL:
+        if regime.regime == Regime.DEAD_LOW_VOL:
             result.regime_ok = False
             result.add_block(f"DEAD_LOW_VOL regime blocks all entries: {regime.details}")
-        elif regime.regime == Regime.SPIKE_HIGH_VOL:
-            if license.setup_type != SetupType.BREAKOUT_RETEST:
-                result.regime_ok = False
-                result.add_block(
-                    f"SPIKE_HIGH_VOL blocks non-breakout setups: {regime.details}"
-                )
-            else:
-                result.regime_ok = True
         else:
             result.regime_ok = True
     else:
@@ -401,8 +390,8 @@ def evaluate_fallback_override(
     # ALL must pass
     checks = []
 
-    if regime.regime != Regime.TRENDING:
-        checks.append(f"Regime not TRENDING ({regime.regime.value})")
+    if regime.regime == Regime.DEAD_LOW_VOL:
+        checks.append(f"Regime DEAD_LOW_VOL — no liquidity")
 
     if license.htf_alignment == HTFAlignment.OPPOSING:
         checks.append("HTF opposing")

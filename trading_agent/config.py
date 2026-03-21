@@ -19,7 +19,7 @@ CATEGORY = "linear"
 
 # --- Core selectivity ---
 STRICT_WAIT_MODE = os.getenv("STRICT_WAIT_MODE", "true").lower() == "true"
-MIN_CONFIDENCE = int(os.getenv("MIN_CONFIDENCE", "50"))
+MIN_CONFIDENCE = int(os.getenv("MIN_CONFIDENCE", "25"))
 ENABLE_FALLBACK_OVERRIDE = os.getenv("ENABLE_FALLBACK_OVERRIDE", "true").lower() == "true"
 
 # --- Regime filter ---
@@ -32,8 +32,8 @@ DEAD_VOL_ATR_PCT_MIN = float(os.getenv("DEAD_VOL_ATR_PCT_MIN", "0.01"))
 SPIKE_CANDLE_ATR_MAX = float(os.getenv("SPIKE_CANDLE_ATR_MAX", "1.5"))
 
 # --- Entry quality gates ---
-TRADE_QUALITY_MIN = int(os.getenv("TRADE_QUALITY_MIN", "55"))
-REVERSAL_QUALITY_MIN = int(os.getenv("REVERSAL_QUALITY_MIN", "65"))
+TRADE_QUALITY_MIN = int(os.getenv("TRADE_QUALITY_MIN", "20"))
+REVERSAL_QUALITY_MIN = int(os.getenv("REVERSAL_QUALITY_MIN", "30"))
 MAX_ENTRY_EXTENSION_ATR = float(os.getenv("MAX_ENTRY_EXTENSION_ATR", "5.0"))
 CANDLE_CLOSE_CONFIRMATION = os.getenv("CANDLE_CLOSE_CONFIRMATION", "true").lower() == "true"
 MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.1"))
@@ -52,8 +52,8 @@ TIMEFRAME_15M = "15"
 TIMEFRAME_1H = "60"
 
 # --- Fallback override strict thresholds ---
-FALLBACK_MIN_CONFIDENCE = int(os.getenv("FALLBACK_MIN_CONFIDENCE", "55"))
-FALLBACK_MIN_QUALITY = int(os.getenv("FALLBACK_MIN_QUALITY", "60"))
+FALLBACK_MIN_CONFIDENCE = int(os.getenv("FALLBACK_MIN_CONFIDENCE", "25"))
+FALLBACK_MIN_QUALITY = int(os.getenv("FALLBACK_MIN_QUALITY", "25"))
 
 # --- Microstructure / order flow ---
 REQUIRE_OI_CONFIRMATION = os.getenv("REQUIRE_OI_CONFIRMATION", "true").lower() == "true"
