@@ -528,6 +528,13 @@ async def run_bot(dry_run: bool = False):
     skip_tracker = SkipTracker()
     paper_tracker = PaperTradeTracker()
 
+    # Strategy evolution — dynamic prompt management
+    from trading_agent.strategy_evolution import StrategyEvolution
+    from trading_agent.ai_brain import set_system_prompt
+    strategy_evo = StrategyEvolution()
+    set_system_prompt(strategy_evo.current_prompt)
+    logger.info(f"Strategy loaded: v{strategy_evo.current_version}")
+
     # Fetch initial equity from Bybit
     initial_equity = await fetch_account_equity()
     if initial_equity > 0:
@@ -862,6 +869,67 @@ async def run_bot(dry_run: bool = False):
                 except Exception as e:
                     logger.warning(f"Meta-learning error: {e}")
                 last_meta_learning = time.time()
+
+            # ── Strategy evolution: rewrite AI prompt based on results ──
+            if strategy_evo.should_evolve():
+                try:
+                    all_entries = journal.get_recent_entries(limit=25)
+                    # Gather trade stats from DB
+                    from trading_agent.data_collector import DataCollector
+                    dc = agent.data_collector
+                    conn = dc._get_conn() if hasattr(dc, '_get_conn') else None
+                    trade_stats = {"total_trades": 0, "wins": 0, "losses": 0,
+                                   "win_rate": 0, "total_pnl": 0,
+                                   "avg_win": 0, "avg_loss": 0,
+                                   "best_trade": 0, "worst_trade": 0}
+                    try:
+                        import sqlite3 as _sql
+                        _c = _sql.connect(config.DB_PATH)
+                        row = _c.execute(
+                            """SELECT COUNT(*) as total,
+                               SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+                               SUM(CASE WHEN net_pnl_usd <= 0 THEN 1 ELSE 0 END) as losses,
+                               SUM(net_pnl_usd) as total_pnl,
+                               AVG(CASE WHEN net_pnl_usd > 0 THEN net_pnl_usd END) as avg_win,
+                               AVG(CASE WHEN net_pnl_usd <= 0 THEN net_pnl_usd END) as avg_loss,
+                               MAX(net_pnl_usd) as best,
+                               MIN(net_pnl_usd) as worst
+                               FROM trade_decisions WHERE decision LIKE 'EXIT_%'"""
+                        ).fetchone()
+                        _c.close()
+                        total = row[0] or 0
+                        wins = row[1] or 0
+                        trade_stats = {
+                            "total_trades": total, "wins": wins,
+                            "losses": row[2] or 0,
+                            "win_rate": (wins / total * 100) if total > 0 else 0,
+                            "total_pnl": row[3] or 0,
+                            "avg_win": row[4] or 0, "avg_loss": row[5] or 0,
+                            "best_trade": row[6] or 0, "worst_trade": row[7] or 0,
+                        }
+                    except Exception:
+                        pass
+
+                    dd_pct = ((peak_equity - agent.equity) / peak_equity * 100) if peak_equity > 0 else 0
+                    perf_summary = (
+                        f"Equity: ${agent.equity:.2f} | Peak: ${peak_equity:.2f} | "
+                        f"DD: {dd_pct:.1f}% | Daily PnL: ${daily_pnl:+.2f}"
+                    )
+                    new_version = await strategy_evo.evolve(
+                        all_entries, perf_summary, trade_stats
+                    )
+                    if new_version:
+                        set_system_prompt(strategy_evo.current_prompt)
+                        journal._insert(
+                            entry_type="STRATEGY_EVOLUTION",
+                            trigger=f"Periodic strategy evolution (every {config.STRATEGY_EVOLUTION_HOURS}h)",
+                            observation=f"Strategy evolved to v{new_version}",
+                            conclusion=f"WR: {trade_stats['win_rate']:.1f}%, PnL: ${trade_stats['total_pnl']:.2f}",
+                            confidence=75,
+                        )
+                        logger.info(f"Strategy evolution complete: v{new_version}")
+                except Exception as e:
+                    logger.warning(f"Strategy evolution error: {e}")
 
             # ── Record cycle observation to journal (every 3 cycles) ──
             if cycle % 3 == 0:

@@ -328,6 +328,102 @@ def create_app() -> "FastAPI":
         except Exception as e:
             return {"positions": [], "error": str(e)}
 
+    @app.get("/api/strategy")
+    async def strategy():
+        """Return current strategy prompt and evolution history."""
+        try:
+            from trading_agent.strategy_evolution import StrategyEvolution
+            evo = StrategyEvolution()
+            history = evo.get_history(limit=20)
+            return {
+                "version": evo.current_version,
+                "prompt": evo.current_prompt,
+                "history": history,
+            }
+        except Exception as e:
+            return {"version": 0, "prompt": f"Error: {e}", "history": []}
+
+    @app.post("/api/strategy/evolve")
+    async def strategy_evolve():
+        """Force a strategy evolution cycle."""
+        try:
+            from trading_agent.strategy_evolution import StrategyEvolution
+            from trading_agent.learning_journal import LearningJournal
+
+            evo = StrategyEvolution()
+            journal = LearningJournal()
+
+            # Gather performance data
+            conn = get_conn()
+            try:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                stats_row = conn.execute(
+                    """SELECT COUNT(*) as total,
+                       SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+                       SUM(CASE WHEN net_pnl_usd <= 0 THEN 1 ELSE 0 END) as losses,
+                       SUM(net_pnl_usd) as total_pnl,
+                       AVG(CASE WHEN net_pnl_usd > 0 THEN net_pnl_usd END) as avg_win,
+                       AVG(CASE WHEN net_pnl_usd <= 0 THEN net_pnl_usd END) as avg_loss,
+                       MAX(net_pnl_usd) as best,
+                       MIN(net_pnl_usd) as worst
+                       FROM trade_decisions
+                       WHERE decision LIKE 'EXIT_%'"""
+                ).fetchone()
+            finally:
+                conn.close()
+
+            total = stats_row[0] or 0
+            wins = stats_row[1] or 0
+            trade_stats = {
+                "total_trades": total,
+                "wins": wins,
+                "losses": stats_row[2] or 0,
+                "win_rate": (wins / total * 100) if total > 0 else 0,
+                "total_pnl": stats_row[3] or 0,
+                "avg_win": stats_row[4] or 0,
+                "avg_loss": stats_row[5] or 0,
+                "best_trade": stats_row[6] or 0,
+                "worst_trade": stats_row[7] or 0,
+            }
+
+            journal_entries = journal.get_recent_entries(limit=25)
+            perf_summary = (
+                f"Total: {total} trades, {wins}W/{trade_stats['losses']}L, "
+                f"WR: {trade_stats['win_rate']:.1f}%, PnL: ${trade_stats['total_pnl']:.2f}"
+            )
+
+            import asyncio
+            result = await evo.evolve(journal_entries, perf_summary, trade_stats)
+            if result:
+                # Update the live AI brain prompt
+                try:
+                    from trading_agent.ai_brain import set_system_prompt
+                    set_system_prompt(evo.current_prompt)
+                except Exception:
+                    pass
+                return {"message": f"Strategy evolved to v{result}", "version": result}
+            else:
+                return {"message": "Evolution skipped (not enough data or no improvement found)"}
+        except Exception as e:
+            return {"message": f"Error: {e}"}
+
+    @app.post("/api/strategy/rollback")
+    async def strategy_rollback():
+        """Rollback strategy to previous version."""
+        try:
+            from trading_agent.strategy_evolution import StrategyEvolution
+            evo = StrategyEvolution()
+            old_v = evo.current_version
+            evo.rollback()
+            try:
+                from trading_agent.ai_brain import set_system_prompt
+                set_system_prompt(evo.current_prompt)
+            except Exception:
+                pass
+            return {"message": f"Rolled back from v{old_v} to v{evo.current_version}"}
+        except Exception as e:
+            return {"message": f"Error: {e}"}
+
     # ── Frontend ────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)
@@ -424,6 +520,7 @@ table.data tr:hover{background:#111}
   <a onclick="showPage('history')" data-page="history">Trade History</a>
   <a onclick="showPage('journal')" data-page="journal">Full Journal</a>
   <a onclick="showPage('tuning')" data-page="tuning">Tuning Log</a>
+  <a onclick="showPage('strategy')" data-page="strategy">Strategy</a>
 </div>
 
 <!-- PAGE: Live Monitor -->
@@ -502,16 +599,32 @@ table.data tr:hover{background:#111}
 </div>
 </div>
 
+<!-- PAGE: Strategy -->
+<div class="page" id="page-strategy">
+<div class="subpage">
+  <h2>AI Strategy <span id="stratVersion" style="color:#888;font-size:14px"></span></h2>
+  <div class="btn-row" style="margin-bottom:12px">
+    <button class="btn btn-orange btn-sm" onclick="forceEvolve()">Force Evolution Now</button>
+    <button class="btn btn-close btn-sm" onclick="rollbackStrategy()">Rollback to Previous</button>
+  </div>
+  <div id="stratMsg"></div>
+  <h3 style="color:#00ff88;margin-top:12px">Current Strategy Prompt</h3>
+  <pre id="stratPrompt" style="background:#111;padding:12px;border-radius:6px;white-space:pre-wrap;word-wrap:break-word;font-size:12px;max-height:50vh;overflow-y:auto;border:1px solid #333;color:#ddd"></pre>
+  <h3 style="color:#ff8800;margin-top:16px">Evolution History</h3>
+  <div id="stratHistory" style="overflow-y:auto;max-height:35vh"></div>
+</div>
+</div>
+
 <script>
 const REFRESH = """ + str(config.DASHBOARD_REFRESH_SEC * 1000) + """;
 const ICONS = {POST_WIN:'icon-win',POST_LOSS:'icon-loss',POST_SKIP_REVIEW:'icon-skip',
   TUNING_CYCLE:'icon-tune',ROLLBACK:'icon-rollback',REGIME_SHIFT:'icon-regime',
   EDGE_DECAY:'icon-loss',META_LEARNING:'icon-tune',PARAMETER_INSIGHT:'icon-tune',
-  MANUAL_OWNER:'icon-manual',PAPER_TRADE:'icon-paper',CYCLE_OBSERVATION:'icon-cycle'};
+  MANUAL_OWNER:'icon-manual',PAPER_TRADE:'icon-paper',CYCLE_OBSERVATION:'icon-cycle',STRATEGY_EVOLUTION:'icon-tune'};
 const LABELS = {POST_WIN:'WIN',POST_LOSS:'LOSS',POST_SKIP_REVIEW:'SKIP',
   TUNING_CYCLE:'TUNING',ROLLBACK:'ROLLBACK',REGIME_SHIFT:'REGIME',
   EDGE_DECAY:'EDGE',META_LEARNING:'META',PARAMETER_INSIGHT:'INSIGHT',
-  PAPER_TRADE:'PAPER',CYCLE_OBSERVATION:'CYCLE'};
+  PAPER_TRADE:'PAPER',CYCLE_OBSERVATION:'CYCLE',STRATEGY_EVOLUTION:'STRATEGY'};
 
 let currentPage = 'monitor';
 let chart = null, candleSeries = null, emaSeries = null;
@@ -527,6 +640,7 @@ function showPage(page){
   if(page==='history') loadHistory();
   if(page==='journal') loadFullJournal();
   if(page==='tuning') loadTuning();
+  if(page==='strategy') loadStrategy();
   if(page==='monitor' && !chart) initChart();
 }
 
@@ -812,6 +926,56 @@ async function loadTuning(){
     html+='</tbody></table>';
     document.getElementById('tuningTable').innerHTML=html;
   }catch(e){document.getElementById('tuningTable').innerHTML='<p style="color:#ff4444">Error loading tuning log</p>'}
+}
+
+// ── Strategy page ──
+async function loadStrategy(){
+  try{
+    const r = await fetch('/api/strategy');
+    const d = await r.json();
+    document.getElementById('stratVersion').textContent = 'v'+d.version;
+    document.getElementById('stratPrompt').textContent = d.prompt||'No strategy loaded';
+    const hist = d.history||[];
+    if(!hist.length){
+      document.getElementById('stratHistory').innerHTML='<p style="color:#666">No evolution history yet. Bot will evolve strategy every 6 hours.</p>';
+      return;
+    }
+    let html='<table class="data"><thead><tr><th>Time</th><th>Version</th><th>Win Rate</th><th>PnL</th><th>Trades</th><th>Changes</th><th>Status</th></tr></thead><tbody>';
+    hist.forEach(h=>{
+      let changes='';
+      try{const c=JSON.parse(h.change_reasoning||'{}');changes=(c.changes||[]).join('; ');}catch(e){changes=h.change_reasoning||'';}
+      const status=h.rolled_back?'<span style="color:#ff4444">ROLLED BACK</span>':'<span style="color:#00ff88">ACTIVE</span>';
+      const wr=(h.win_rate_at_change||0).toFixed(1);
+      const pnl=(h.total_pnl_at_change||0).toFixed(2);
+      html+='<tr><td>'+utcToLocal(h.timestamp_utc)+'</td><td>v'+h.version+'</td>'+
+        '<td>'+wr+'%</td><td>$'+pnl+'</td><td>'+h.trades_since_last+'</td>'+
+        '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+changes+'</td>'+
+        '<td>'+status+'</td></tr>';
+    });
+    html+='</tbody></table>';
+    document.getElementById('stratHistory').innerHTML=html;
+  }catch(e){document.getElementById('stratPrompt').textContent='Error loading strategy: '+e}
+}
+
+async function forceEvolve(){
+  if(!confirm('Force strategy evolution now? This will use an API call to rewrite the strategy.'))return;
+  document.getElementById('stratMsg').innerHTML='<div class="msg msg-ok">Evolution in progress...</div>';
+  try{
+    const r = await fetch('/api/strategy/evolve',{method:'POST'});
+    const d = await r.json();
+    document.getElementById('stratMsg').innerHTML='<div class="msg msg-ok">'+(d.message||JSON.stringify(d))+'</div>';
+    loadStrategy();
+  }catch(e){document.getElementById('stratMsg').innerHTML='<div class="msg msg-ok" style="color:#ff4444">Error: '+e+'</div>';}
+}
+
+async function rollbackStrategy(){
+  if(!confirm('Rollback strategy to previous version?'))return;
+  try{
+    const r = await fetch('/api/strategy/rollback',{method:'POST'});
+    const d = await r.json();
+    document.getElementById('stratMsg').innerHTML='<div class="msg msg-ok">'+(d.message||JSON.stringify(d))+'</div>';
+    loadStrategy();
+  }catch(e){document.getElementById('stratMsg').innerHTML='<div class="msg msg-ok" style="color:#ff4444">Error: '+e+'</div>';}
 }
 
 // ── Manual controls ──

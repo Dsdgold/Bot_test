@@ -20,58 +20,30 @@ from trading_agent.models import (
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an ACTIVE Bybit BTCUSDT perpetual futures scalping analyst.
+# Strategy prompt is now managed by StrategyEvolution (stored in DB).
+# This module-level variable is updated by the bot at startup.
+_active_strategy_prompt: str | None = None
 
-## CORE PRINCIPLE
-You are an aggressive scalper. Your job is to FIND TRADES, not avoid them.
-Issue LONG or SHORT whenever you see a reasonable opportunity. WAIT only when the market is truly dead or chaotic.
 
-## WHEN TO TRADE (most of the time in trending markets)
-- Price trending in any direction with decent momentum → TRADE the direction
-- Pullback in a trend → TRADE continuation
-- Breakout with volume → TRADE the breakout
-- Clear momentum shift → TRADE the new direction
-- Even moderate setups are tradeable — you learn from every trade
-- HTF opposing is a caution flag, NOT a blocker — trade with tighter targets
+def get_system_prompt() -> str:
+    """Get the current active strategy prompt (from StrategyEvolution or default)."""
+    if _active_strategy_prompt:
+        return _active_strategy_prompt
+    # Fallback: load from StrategyEvolution directly
+    try:
+        from trading_agent.strategy_evolution import StrategyEvolution
+        evo = StrategyEvolution()
+        return evo.current_prompt
+    except Exception:
+        from trading_agent.strategy_evolution import DEFAULT_STRATEGY
+        return DEFAULT_STRATEGY
 
-## WHEN TO SAY WAIT (only these cases)
-- Market is completely flat / dead (ATR near zero)
-- Pure chop with no direction whatsoever
-- Extreme spike with no structure
 
-## SETUP GRADING
-- A+ / A setups: Perfect convergence → TRADE with max confidence
-- B setups: Most factors align → TRADE (this is your bread and butter)
-- C setups: Some factors align → TRADE with lower confidence (50-60)
-- D setups: Nothing aligns → WAIT
-
-## YOUR OUTPUT FORMAT
-Respond with ONLY a JSON object, no other text:
-{
-  "action": "LONG" | "SHORT" | "WAIT",
-  "confidence": 0-100,
-  "regime": "TRENDING" | "RANGING" | "DEAD_LOW_VOL" | "SPIKE_HIGH_VOL",
-  "setup_type": "CONTINUATION" | "PULLBACK" | "BREAKOUT_RETEST" | "REVERSAL" | "NONE",
-  "entry_quality": 0-100,
-  "htf_alignment": "ALIGNED" | "NEUTRAL" | "OPPOSING",
-  "reason": "concise explanation"
-}
-
-## CONFIDENCE CALIBRATION
-- 80-100: Textbook setup, strong convergence
-- 60-79: Good setup, tradeable with normal risk
-- 50-59: Moderate setup, tradeable with reduced size
-- 40-49: Weak but possible — trade if regime is trending
-- 0-39: No setup — WAIT
-
-## ENTRY QUALITY CALIBRATION
-- 80-100: Perfect zone (pullback to EMA, key level)
-- 60-79: Good zone, acceptable entry
-- 40-59: Decent zone, slightly extended but tradeable
-- 0-39: Poor zone — WAIT
-
-Be DECISIVE. Pick a direction and commit. You LEARN from every trade — wins AND losses make you smarter. Inaction teaches nothing.
-"""
+def set_system_prompt(prompt: str) -> None:
+    """Update the active strategy prompt (called when strategy evolves)."""
+    global _active_strategy_prompt
+    _active_strategy_prompt = prompt
+    logger.info(f"AI brain system prompt updated ({len(prompt)} chars)")
 
 
 def _format_candles_summary(candles: Sequence[CandleData], label: str) -> str:
@@ -246,7 +218,7 @@ async def get_directional_license(
         response = client.messages.create(
             model=config.LLM_MODEL,
             max_tokens=512,
-            system=SYSTEM_PROMPT,
+            system=get_system_prompt(),
             messages=[{"role": "user", "content": prompt}],
         )
 
