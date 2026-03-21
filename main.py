@@ -33,7 +33,7 @@ from trading_agent.self_optimizer import SelfOptimizer
 
 logger = logging.getLogger(__name__)
 
-LOOP_INTERVAL_SEC = 60  # 1-minute candle cycle
+LOOP_INTERVAL_SEC = 30  # 30-second cycle for more micro-trades
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +676,66 @@ async def run_bot(dry_run: bool = False):
             if active_positions:
                 agent.update_price_tick(price)
 
+            # ── Trailing Stop Loss: lock in profits progressively ──
+            # When unrealized profit reaches a threshold, move SL to lock partial profit.
+            # E.g. $1.50 profit → SL at +$0.50, $3.00 profit → SL at +$1.00, etc.
+            TRAIL_TIERS = [
+                (1.0, 0.30),   # $1.00 profit → lock $0.30
+                (1.5, 0.50),   # $1.50 profit → lock $0.50
+                (2.0, 0.80),   # $2.00 profit → lock $0.80
+                (3.0, 1.50),   # $3.00 profit → lock $1.50
+                (5.0, 3.00),   # $5.00 profit → lock $3.00
+                (8.0, 5.50),   # $8.00 profit → lock $5.50
+            ]
+            trail_updated = False
+            for tid, pos in list(active_positions.items()):
+                if pos.direction == "LONG":
+                    unrealized_usd = (price - pos.entry_price) * pos.qty_btc
+                else:
+                    unrealized_usd = (pos.entry_price - price) * pos.qty_btc
+
+                if unrealized_usd <= 0:
+                    continue  # Only trail when in profit
+
+                # Find the best matching tier
+                best_lock = None
+                for threshold, lock_amount in reversed(TRAIL_TIERS):
+                    if unrealized_usd >= threshold:
+                        best_lock = lock_amount
+                        break
+
+                if best_lock is None:
+                    continue
+
+                # Calculate new SL price that locks in best_lock profit
+                lock_per_btc = best_lock / pos.qty_btc
+                if pos.direction == "LONG":
+                    new_sl = pos.entry_price + lock_per_btc
+                    # Only move SL up, never down
+                    if new_sl > pos.sl_price:
+                        old_sl = pos.sl_price
+                        pos.sl_price = round(new_sl, 2)
+                        trail_updated = True
+                        logger.info(
+                            f"TRAILING SL [{tid[:8]}]: {pos.direction} uPnL=${unrealized_usd:+.2f} → "
+                            f"SL moved {old_sl:.2f} → {pos.sl_price:.2f} (locking ${best_lock:.2f})"
+                        )
+                else:
+                    new_sl = pos.entry_price - lock_per_btc
+                    # Only move SL down (tighter), never up
+                    if new_sl < pos.sl_price:
+                        old_sl = pos.sl_price
+                        pos.sl_price = round(new_sl, 2)
+                        trail_updated = True
+                        logger.info(
+                            f"TRAILING SL [{tid[:8]}]: {pos.direction} uPnL=${unrealized_usd:+.2f} → "
+                            f"SL moved {old_sl:.2f} → {pos.sl_price:.2f} (locking ${best_lock:.2f})"
+                        )
+
+            # Update exchange SL if trailing moved any stops
+            if trail_updated and active_positions and not dry_run:
+                update_exchange_sl(active_positions)
+
             # ── Check each active position for SL/TP hit ──
             closed_ids: list[str] = []
             for tid, pos in list(active_positions.items()):
@@ -804,11 +864,11 @@ async def run_bot(dry_run: bool = False):
             # ── Auto-relax: loosen filters if no trades for too long ──
             mins_since_trade = (time.time() - last_trade_time) / 60
             new_relax = 0
-            if mins_since_trade > 30:
+            if mins_since_trade > 15:
                 new_relax = 3  # ultra
-            elif mins_since_trade > 20:
-                new_relax = 2  # very relaxed
             elif mins_since_trade > 10:
+                new_relax = 2  # very relaxed
+            elif mins_since_trade > 5:
                 new_relax = 1  # relaxed
 
             if new_relax != relax_level:

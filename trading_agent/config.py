@@ -69,14 +69,14 @@ MAX_SPREAD_TOLERANCE_USDT = float(os.getenv("MAX_SPREAD_TOLERANCE_USDT", "2.5"))
 # --- Dynamic SL/TP ---
 USE_DYNAMIC_SL_TP = os.getenv("USE_DYNAMIC_SL_TP", "true").lower() == "true"
 ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "1.0"))
-TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "1.6"))
-TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.35"))
-TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.2"))
+TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "1.3"))
+TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.15"))
+TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.0"))
 MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.5"))
 MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.35"))
 MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.90"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.45"))
-MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "1.50"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.25"))
+MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.80"))
 
 # --- Session filter ---
 SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").lower() == "true"
@@ -88,7 +88,7 @@ BLOCKED_HOURS_LOCAL = [
 MIN_SAMPLE_PER_HOUR = int(os.getenv("MIN_SAMPLE_PER_HOUR", "10"))
 
 # --- Cooldowns ---
-POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "60"))
+POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "15"))
 REENTRY_COOLDOWN_CANDLES = int(os.getenv("REENTRY_COOLDOWN_CANDLES", "0"))
 SAME_SIDE_LOSS_PAUSE_COUNT = int(os.getenv("SAME_SIDE_LOSS_PAUSE_COUNT", "4"))
 SAME_SIDE_LOSS_PAUSE_SEC = int(os.getenv("SAME_SIDE_LOSS_PAUSE_SEC", "300"))
@@ -151,10 +151,10 @@ DD_HALT_PCT = float(os.getenv("DD_HALT_PCT", "25.0"))
 DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "10.0"))
 WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "20.0"))
 EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "10"))
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
 
 # --- Token optimization ---
-LICENSE_CACHE_TTL_SEC = int(os.getenv("LICENSE_CACHE_TTL_SEC", "180"))
+LICENSE_CACHE_TTL_SEC = int(os.getenv("LICENSE_CACHE_TTL_SEC", "60"))
 LICENSE_CACHE_INVALIDATE_ATR_MOVE = float(os.getenv("LICENSE_CACHE_INVALIDATE_ATR_MOVE", "1.0"))
 LICENSE_CACHE_INVALIDATE_VOL_SPIKE = float(os.getenv("LICENSE_CACHE_INVALIDATE_VOL_SPIKE", "3.0"))
 LLM_MAX_TOKENS_LICENSE = int(os.getenv("LLM_MAX_TOKENS_LICENSE", "200"))
@@ -214,5 +214,5 @@ AUTO_EXPORT_RETAIN_DAYS = int(os.getenv("AUTO_EXPORT_RETAIN_DAYS", "90"))
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
 MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "50"))
-DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.4"))
-DEFAULT_SL_PCT = float(os.getenv("DEFAULT_SL_PCT", "0.25"))
+DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.3"))
+DEFAULT_SL_PCT = float(os.getenv("DEFAULT_SL_PCT", "0.20"))
