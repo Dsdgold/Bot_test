@@ -335,6 +335,7 @@ async def run_bot(dry_run: bool = False):
     last_regime_time = time.time()
     last_regime_trades = 0
     last_tuning_cycle = time.time()
+    last_meta_learning = time.time()
     current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     current_week = datetime.now(timezone.utc).isocalendar()[1]
 
@@ -455,9 +456,10 @@ async def run_bot(dry_run: bool = False):
 
                         optimizer.increment_trade_counter()
 
-                        # ── Learning Journal: post-trade entry ──
+                        # ── Learning Journal: LLM-powered post-trade reflection ──
                         mfe, mae = agent.data_collector.close_mfe_mae()
-                        journal.record_post_trade(
+                        hold_duration = agent.data_collector.get_hold_duration()
+                        await journal.llm_post_trade_reflection(
                             trade_id=active_trade_id,
                             is_win=is_win,
                             net_pnl=net_pnl,
@@ -467,10 +469,7 @@ async def run_bot(dry_run: bool = False):
                             setup_type=active_license.setup_type.value if active_license else "NONE",
                             mfe=mfe,
                             mae=mae,
-                            hold_sec=agent.data_collector.get_hold_duration(),
-                            sl_price=active_sl_price,
-                            tp_price=active_tp_price,
-                            entry_price=active_entry_price,
+                            hold_sec=hold_duration,
                         )
 
                         # Deeper loss reflection
@@ -509,7 +508,10 @@ async def run_bot(dry_run: bool = False):
                 await asyncio.sleep(max(0, LOOP_INTERVAL_SEC - (time.time() - cycle_start)))
                 continue
 
-            # ── Evaluate market ──
+            # ── Get journal insights for AI memory ──
+            journal_entries = journal.get_recent_entries(limit=10)
+
+            # ── Evaluate market (with journal context) ──
             license_result, gate_result, sl_tp = await agent.evaluate_market(
                 candles_1m=candles_1m,
                 candles_5m=candles_5m,
@@ -520,6 +522,7 @@ async def run_bot(dry_run: bool = False):
                 latency_ms=market["latency_ms"],
                 oi_current=market["oi_current"],
                 oi_previous=market["oi_previous"],
+                journal_insights=journal_entries,
             )
 
             action = license_result.action.value
@@ -562,6 +565,23 @@ async def run_bot(dry_run: bool = False):
                             )
                     logger.info(f"Tuning cycle complete. Rollbacks: {len(rollbacks)}")
                 last_tuning_cycle = time.time()
+
+            # ── Meta-learner: cross-cycle pattern recognition ──
+            meta_interval = config.META_LEARNING_INTERVAL_HOURS * 3600
+            if (time.time() - last_meta_learning) >= meta_interval:
+                try:
+                    all_entries = journal.get_recent_entries(limit=30)
+                    dd_pct = ((peak_equity - agent.equity) / peak_equity * 100) if peak_equity > 0 else 0
+                    perf_summary = (
+                        f"Equity: ${agent.equity:.2f} | Peak: ${peak_equity:.2f} | "
+                        f"DD: {dd_pct:.1f}% | Daily PnL: ${daily_pnl:+.2f} | "
+                        f"Consecutive losses: {consecutive_losses}"
+                    )
+                    await journal.llm_meta_learning(all_entries, perf_summary)
+                    logger.info("Meta-learning cycle complete")
+                except Exception as e:
+                    logger.warning(f"Meta-learning error: {e}")
+                last_meta_learning = time.time()
 
             # ── Decision: TRADE or WAIT ──
             if gate_result.passed and license_result.is_trade:

@@ -276,6 +276,131 @@ class LearningJournal:
         )
 
     # ------------------------------------------------------------------
+    # LLM-powered deep reflection
+    # ------------------------------------------------------------------
+
+    async def llm_post_trade_reflection(
+        self,
+        trade_id: str,
+        is_win: bool,
+        net_pnl: float,
+        entry_quality: int,
+        confidence: int,
+        regime: str,
+        setup_type: str,
+        mfe: float = 0,
+        mae: float = 0,
+        hold_sec: int = 0,
+        similar_trades_summary: str = "",
+    ) -> int:
+        """Use LLM for deeper post-trade analysis."""
+        if not config.ANTHROPIC_API_KEY:
+            return self.record_post_trade(
+                trade_id, is_win, net_pnl, entry_quality, confidence,
+                regime, setup_type, mfe, mae, hold_sec,
+            )
+
+        outcome = "WIN" if is_win else "LOSS"
+        prompt = (
+            f"Trade closed: {outcome} ${net_pnl:+.2f} | {hold_sec}s hold | "
+            f"Quality {entry_quality} | Confidence {confidence}\n"
+            f"Regime: {regime} | Setup: {setup_type}\n"
+            f"MFE: ${mfe:.1f} | MAE: ${mae:.1f}\n"
+        )
+        if similar_trades_summary:
+            prompt += f"Recent similar trades: {similar_trades_summary}\n"
+        prompt += (
+            "Respond JSON only: {\"observation\": \"...\", \"conclusion\": \"...\", "
+            "\"suggested_action\": \"...\", \"confidence_in_conclusion\": 0-100}\n"
+            "Max 3 sentences total. Be specific and actionable."
+        )
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+            response = client.messages.create(
+                model=config.LLM_MODEL,
+                max_tokens=150,
+                system="You are a trading performance analyst. Analyze trade outcomes and find patterns. Be concise and actionable.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(l for l in lines if not l.strip().startswith("```"))
+
+            data = json.loads(text)
+            return self._insert(
+                entry_type="POST_WIN" if is_win else "POST_LOSS",
+                trade_id=trade_id,
+                trigger=f"Trade {trade_id}: {outcome} ${net_pnl:+.2f}",
+                observation=data.get("observation", "")[:300],
+                conclusion=data.get("conclusion", "")[:300],
+                confidence=int(data.get("confidence_in_conclusion", 60)),
+                suggested_action=data.get("suggested_action", "")[:200],
+            )
+        except Exception as e:
+            logger.warning(f"LLM post-trade reflection failed: {e}")
+            return self.record_post_trade(
+                trade_id, is_win, net_pnl, entry_quality, confidence,
+                regime, setup_type, mfe, mae, hold_sec,
+            )
+
+    async def llm_meta_learning(self, recent_entries: list[dict], performance_summary: str) -> int:
+        """Cross-cycle meta-learning: find patterns across multiple tuning cycles."""
+        if not config.ANTHROPIC_API_KEY:
+            return 0
+
+        # Summarize recent journal entries
+        entry_summaries = []
+        for e in recent_entries[-15:]:
+            etype = e.get("entry_type", "")
+            obs = (e.get("observation") or "")[:100]
+            conc = (e.get("conclusion") or "")[:100]
+            entry_summaries.append(f"[{etype}] {obs} → {conc}")
+
+        prompt = (
+            f"Accumulated learning journal (last {len(entry_summaries)} entries):\n"
+            + "\n".join(entry_summaries)
+            + f"\n\nPerformance: {performance_summary}\n\n"
+            "Questions to answer (respond JSON only):\n"
+            "1. What cross-pattern insights do you see?\n"
+            "2. Is the bot over-trading or under-trading?\n"
+            "3. What is the single highest-impact improvement?\n"
+            "4. Any emerging regime shift patterns?\n"
+            "{\"observation\": \"...\", \"conclusion\": \"...\", "
+            "\"suggested_action\": \"...\", \"confidence_in_conclusion\": 0-100}\n"
+            "Max 5 sentences total."
+        )
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+            response = client.messages.create(
+                model=config.LLM_MODEL,
+                max_tokens=300,
+                system="You are a trading systems meta-analyst. Find patterns across multiple trading sessions and tuning cycles. Be specific.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(l for l in lines if not l.strip().startswith("```"))
+
+            data = json.loads(text)
+            return self._insert(
+                entry_type="META_LEARNING",
+                trigger="Periodic meta-learning cycle",
+                observation=data.get("observation", "")[:400],
+                conclusion=data.get("conclusion", "")[:400],
+                confidence=int(data.get("confidence_in_conclusion", 50)),
+                suggested_action=data.get("suggested_action", "")[:300],
+            )
+        except Exception as e:
+            logger.warning(f"Meta-learning LLM call failed: {e}")
+            return 0
+
+    # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
 

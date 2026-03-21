@@ -113,6 +113,7 @@ class TradingAgent:
         oi_current: float | None = None,
         oi_previous: float | None = None,
         price_new_extreme: bool = False,
+        journal_insights: list[dict] | None = None,
     ) -> tuple[DirectionalLicense, EntryGateResult, Optional[SLTPLevels]]:
         """
         Full evaluation cycle:
@@ -162,10 +163,11 @@ class TradingAgent:
             indicators["volume_ratio"] = f"{vol_ratio:.2f}x"
             indicators["extension_atr"] = f"{ext_atr:.2f}"
 
-        # Step 4: Get AI directional license
+        # Step 4: Get AI directional license (with journal memory)
         license = await get_directional_license(
             candles_1m, candles_5m, candles_15m, candles_1h,
             regime, indicators,
+            journal_insights=journal_insights,
         )
         logger.info(
             f"AI License: {license.action.value} "

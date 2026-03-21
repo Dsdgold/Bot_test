@@ -201,6 +201,33 @@ def parse_ai_response(response_text: str) -> Optional[DirectionalLicense]:
         return None
 
 
+def _build_journal_context(journal_insights: list[dict] | None = None) -> str:
+    """Build context from recent learning journal entries for AI memory."""
+    if not journal_insights:
+        return ""
+
+    lines = [
+        "",
+        "## YOUR ACCUMULATED KNOWLEDGE (from past trades and analysis)",
+        "Use these insights to make BETTER decisions. Learn from mistakes.",
+        "",
+    ]
+    for entry in journal_insights[-8:]:  # Last 8 entries max
+        etype = entry.get("entry_type", "")
+        obs = entry.get("observation", "")[:150]
+        conc = entry.get("conclusion", "")[:150]
+        icon = {"POST_WIN": "WIN", "POST_LOSS": "LOSS", "POST_SKIP_REVIEW": "SKIP",
+                "REGIME_SHIFT": "REGIME", "EDGE_DECAY": "EDGE", "TUNING_CYCLE": "TUNE",
+                "META_LEARNING": "META", "ROLLBACK": "ROLLBACK"}.get(etype, etype)
+        lines.append(f"- [{icon}] {obs}")
+        if conc:
+            lines.append(f"  → {conc}")
+
+    lines.append("")
+    lines.append("Apply these lessons. Avoid repeating past mistakes.")
+    return "\n".join(lines)
+
+
 async def get_directional_license(
     candles_1m: Sequence[CandleData],
     candles_5m: Sequence[CandleData],
@@ -208,15 +235,22 @@ async def get_directional_license(
     candles_1h: Sequence[CandleData],
     regime: RegimeState,
     indicators: dict,
+    journal_insights: list[dict] | None = None,
 ) -> DirectionalLicense:
     """
     Query the LLM for a directional license.
 
+    journal_insights: Recent learning journal entries to inject as AI memory.
     Falls back to WAIT if API fails or response is unparseable.
     """
     prompt = build_analysis_prompt(
         candles_1m, candles_5m, candles_15m, candles_1h, regime, indicators
     )
+
+    # Append journal insights as accumulated knowledge
+    journal_context = _build_journal_context(journal_insights)
+    if journal_context:
+        prompt += "\n" + journal_context
 
     if not config.ANTHROPIC_API_KEY:
         logger.warning("No ANTHROPIC_API_KEY set — returning WAIT")
