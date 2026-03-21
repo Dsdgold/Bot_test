@@ -111,8 +111,13 @@ def create_app() -> "FastAPI":
             }
             # Overlay live bot equity if available (more up-to-date than DB)
             try:
-                from main import get_shared_equity
-                bot_eq = get_shared_equity()
+                import sys
+                _mod = sys.modules.get("__main__")
+                if _mod and hasattr(_mod, "get_shared_equity"):
+                    bot_eq = _mod.get_shared_equity()
+                else:
+                    from main import get_shared_equity
+                    bot_eq = get_shared_equity()
                 if bot_eq and bot_eq.get("equity", 0) > 0:
                     equity_data["equity_usdt"] = bot_eq["equity"]
                     equity_data["peak_equity"] = bot_eq.get("peak_equity", 0)
@@ -364,8 +369,13 @@ def create_app() -> "FastAPI":
 
         # 2) Fallback: bot's internal equity tracking
         try:
-            from main import get_shared_equity
-            eq = get_shared_equity()
+            import sys
+            _mod = sys.modules.get("__main__")
+            if _mod and hasattr(_mod, "get_shared_equity"):
+                eq = _mod.get_shared_equity()
+            else:
+                from main import get_shared_equity
+                eq = get_shared_equity()
             if eq and eq.get("equity", 0) > 0:
                 return {
                     "equity": eq["equity"],
@@ -434,6 +444,12 @@ def create_app() -> "FastAPI":
     async def bot_positions():
         """Return bot's internal position tracking (more detailed than exchange API)."""
         try:
+            import sys
+            # When run via 'python main.py --dashboard', the module is __main__, not 'main'
+            mod = sys.modules.get("__main__")
+            if mod and hasattr(mod, "get_shared_positions"):
+                return {"positions": mod.get_shared_positions()}
+            # Fallback: try normal import (e.g. when dashboard runs standalone)
             from main import get_shared_positions
             return {"positions": get_shared_positions()}
         except Exception as e:
