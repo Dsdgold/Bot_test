@@ -654,12 +654,29 @@ async def run_bot(dry_run: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="BTCUSDT Scalping Bot")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without orders")
-    parser.add_argument("--dashboard", action="store_true", help="Also start dashboard")
+    parser.add_argument("--dashboard", action="store_true", help="Start dashboard alongside bot")
     args = parser.parse_args()
 
     if args.dashboard:
-        print("Dashboard: python scripts/dashboard_server.py")
-        print("(Run in a separate terminal)")
+        import threading
+
+        def run_dashboard():
+            try:
+                import uvicorn
+                from scripts.dashboard_server import create_app
+                app = create_app()
+                uvicorn.run(
+                    app,
+                    host=config.DASHBOARD_HOST,
+                    port=config.DASHBOARD_PORT,
+                    log_level="warning",
+                )
+            except Exception as e:
+                logger.error(f"Dashboard failed: {e}")
+
+        dash_thread = threading.Thread(target=run_dashboard, daemon=True)
+        dash_thread.start()
+        print(f"Dashboard: http://{config.DASHBOARD_HOST}:{config.DASHBOARD_PORT}")
 
     asyncio.run(run_bot(dry_run=args.dry_run))
 
