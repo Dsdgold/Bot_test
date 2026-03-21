@@ -755,15 +755,16 @@ async def run_bot(dry_run: bool = False):
 
             # ── Sync shared state for dashboard ──
             dd_pct_now = ((peak_equity - agent.equity) / peak_equity * 100) if peak_equity > 0 else 0
+            _t = agent.paper_wins + agent.paper_losses
             _shared_equity.update({
                 "equity": round(agent.equity, 2),
                 "peak_equity": round(peak_equity, 2),
                 "dd_pct": round(dd_pct_now, 2),
                 "daily_pnl": round(daily_pnl, 2),
-                "total_trades": wins + losses,
-                "wins": wins,
-                "losses": losses,
-                "win_rate": round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0,
+                "total_trades": _t,
+                "wins": agent.paper_wins,
+                "losses": agent.paper_losses,
+                "win_rate": round(agent.paper_wins / _t * 100, 1) if _t > 0 else 0,
                 "consecutive_losses": consecutive_losses,
             })
             if active_positions:
