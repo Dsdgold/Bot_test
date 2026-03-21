@@ -29,10 +29,53 @@ except ImportError:
 
 DB_PATH = config.DB_PATH
 
+_ENSURE_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS trade_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_utc TEXT, decision TEXT, regime TEXT, skip_reason TEXT,
+    trade_id TEXT, entry_price REAL, exit_price REAL, net_pnl_usd REAL,
+    hold_duration_sec INTEGER, mfe_usd REAL, mae_usd REAL, trade_source TEXT
+);
+CREATE TABLE IF NOT EXISTS equity_curve (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_utc TEXT, equity_usdt REAL, peak_equity REAL, drawdown_pct REAL,
+    total_trades INTEGER, total_wins INTEGER, win_rate REAL, total_net_pnl REAL
+);
+CREATE TABLE IF NOT EXISTS learning_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_utc TEXT NOT NULL, entry_type TEXT NOT NULL, trade_id TEXT,
+    trigger TEXT, observation TEXT, conclusion TEXT,
+    confidence_in_conclusion INTEGER DEFAULT 0,
+    supporting_sample_size INTEGER DEFAULT 0,
+    suggested_action TEXT, applied INTEGER DEFAULT 0,
+    applied_timestamp TEXT, outcome_after_applied TEXT
+);
+CREATE TABLE IF NOT EXISTS parameter_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_utc TEXT NOT NULL, parameter_name TEXT NOT NULL,
+    old_value TEXT, new_value TEXT, tier INTEGER NOT NULL,
+    trigger TEXT, supporting_evidence TEXT,
+    sample_size INTEGER DEFAULT 0, statistical_confidence REAL DEFAULT 0,
+    status TEXT DEFAULT 'APPLIED', probation_start_trade INTEGER,
+    probation_end_trade INTEGER, pre_change_expectancy REAL,
+    post_change_expectancy REAL, rollback_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS token_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_utc TEXT, total_tokens INTEGER DEFAULT 0
+);
+"""
+
+_tables_ensured = False
+
 
 def get_conn():
+    global _tables_ensured
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    if not _tables_ensured:
+        conn.executescript(_ENSURE_TABLES_SQL)
+        _tables_ensured = True
     return conn
 
 
