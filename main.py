@@ -88,34 +88,41 @@ def validate_api_keys() -> bool:
 # ---------------------------------------------------------------------------
 
 async def fetch_candles(symbol: str, interval: str, limit: int) -> list[CandleData]:
-    """Fetch candles from Bybit API."""
-    try:
-        session = _get_session()
-        result = session.get_kline(
-            category=config.CATEGORY,
-            symbol=symbol,
-            interval=interval,
-            limit=limit,
-        )
+    """Fetch candles from Bybit API with rate limit retry."""
+    for attempt in range(3):
+        try:
+            session = _get_session()
+            result = session.get_kline(
+                category=config.CATEGORY,
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+            )
 
-        candles = []
-        for item in reversed(result["result"]["list"]):
-            candles.append(CandleData(
-                timestamp=datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc),
-                open=float(item[1]),
-                high=float(item[2]),
-                low=float(item[3]),
-                close=float(item[4]),
-                volume=float(item[5]),
-            ))
-        return candles
+            candles = []
+            for item in reversed(result["result"]["list"]):
+                candles.append(CandleData(
+                    timestamp=datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc),
+                    open=float(item[1]),
+                    high=float(item[2]),
+                    low=float(item[3]),
+                    close=float(item[4]),
+                    volume=float(item[5]),
+                ))
+            return candles
 
-    except ImportError:
-        logger.warning("pybit not installed — run: pip install pybit")
-        return []
-    except Exception as e:
-        logger.error(f"Failed to fetch candles ({interval}): {e}")
-        return []
+        except ImportError:
+            logger.warning("pybit not installed — run: pip install pybit")
+            return []
+        except Exception as e:
+            if "rate limit" in str(e).lower() or "10006" in str(e):
+                wait = 2 ** attempt
+                logger.warning(f"Rate limit ({interval}) — waiting {wait}s")
+                await asyncio.sleep(wait)
+                continue
+            logger.error(f"Failed to fetch candles ({interval}): {e}")
+            return []
+    return []
 
 
 async def fetch_market_data() -> dict:
@@ -391,10 +398,13 @@ async def run_bot(dry_run: bool = False):
                 weekly_pnl = 0.0
                 current_week = week
 
-            # ── Fetch data ──
+            # ── Fetch data (with rate limit spacing) ──
             candles_1m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_1M, 100)
+            await asyncio.sleep(0.3)
             candles_5m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_5M, 50)
+            await asyncio.sleep(0.3)
             candles_15m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_15M, 50)
+            await asyncio.sleep(0.3)
             candles_1h = await fetch_candles(config.SYMBOL, config.TIMEFRAME_1H, 30)
 
             if not candles_1m:
