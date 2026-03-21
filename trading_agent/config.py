@@ -151,7 +151,7 @@ DD_HALT_PCT = float(os.getenv("DD_HALT_PCT", "25.0"))
 DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "10.0"))
 WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "20.0"))
 EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "10"))
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
 
 # --- Token optimization ---
 LICENSE_CACHE_TTL_SEC = int(os.getenv("LICENSE_CACHE_TTL_SEC", "60"))
