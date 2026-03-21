@@ -19,24 +19,24 @@ CATEGORY = "linear"
 
 # --- Core selectivity ---
 STRICT_WAIT_MODE = os.getenv("STRICT_WAIT_MODE", "true").lower() == "true"
-MIN_CONFIDENCE = int(os.getenv("MIN_CONFIDENCE", "25"))
-ENABLE_FALLBACK_OVERRIDE = os.getenv("ENABLE_FALLBACK_OVERRIDE", "true").lower() == "true"
+MIN_CONFIDENCE = int(os.getenv("MIN_CONFIDENCE", "40"))
+ENABLE_FALLBACK_OVERRIDE = os.getenv("ENABLE_FALLBACK_OVERRIDE", "false").lower() == "true"
 
 # --- Regime filter ---
 REGIME_FILTER_ENABLED = os.getenv("REGIME_FILTER_ENABLED", "true").lower() == "true"
 USE_ADX_FILTER = os.getenv("USE_ADX_FILTER", "true").lower() == "true"
-ADX_MIN = float(os.getenv("ADX_MIN", "10"))
+ADX_MIN = float(os.getenv("ADX_MIN", "18"))
 USE_CHOP_FILTER = os.getenv("USE_CHOP_FILTER", "true").lower() == "true"
-CHOP_MAX = float(os.getenv("CHOP_MAX", "80"))
+CHOP_MAX = float(os.getenv("CHOP_MAX", "62"))
 DEAD_VOL_ATR_PCT_MIN = float(os.getenv("DEAD_VOL_ATR_PCT_MIN", "0.01"))
 SPIKE_CANDLE_ATR_MAX = float(os.getenv("SPIKE_CANDLE_ATR_MAX", "1.5"))
 
 # --- Entry quality gates ---
-TRADE_QUALITY_MIN = int(os.getenv("TRADE_QUALITY_MIN", "20"))
-REVERSAL_QUALITY_MIN = int(os.getenv("REVERSAL_QUALITY_MIN", "30"))
-MAX_ENTRY_EXTENSION_ATR = float(os.getenv("MAX_ENTRY_EXTENSION_ATR", "5.0"))
+TRADE_QUALITY_MIN = int(os.getenv("TRADE_QUALITY_MIN", "40"))
+REVERSAL_QUALITY_MIN = int(os.getenv("REVERSAL_QUALITY_MIN", "55"))
+MAX_ENTRY_EXTENSION_ATR = float(os.getenv("MAX_ENTRY_EXTENSION_ATR", "2.5"))
 CANDLE_CLOSE_CONFIRMATION = os.getenv("CANDLE_CLOSE_CONFIRMATION", "true").lower() == "true"
-MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.1"))
+MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.5"))
 
 # --- Directional License ---
 LICENSE_VALIDITY_MINUTES = int(os.getenv("LICENSE_VALIDITY_MINUTES", "15"))
@@ -67,15 +67,17 @@ MAKER_FEE_RATE = float(os.getenv("MAKER_FEE_RATE", "0.0002"))
 MAX_SPREAD_TOLERANCE_USDT = float(os.getenv("MAX_SPREAD_TOLERANCE_USDT", "2.5"))
 
 # --- Dynamic SL/TP ---
+# Wider targets to overcome fees (maker 0.02% x2 = 0.04% round-trip)
+# TP must be > 0.04% fees + SL risk to be profitable
 USE_DYNAMIC_SL_TP = os.getenv("USE_DYNAMIC_SL_TP", "true").lower() == "true"
-ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "1.0"))
-TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "1.3"))
-TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.15"))
-TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.0"))
-MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.5"))
-MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.35"))
-MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.90"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.25"))
+ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "1.2"))
+TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.0"))
+TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.8"))
+TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.5"))
+MIN_NET_RR = float(os.getenv("MIN_NET_RR", "1.2"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.15"))
+MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.50"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.20"))
 MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.80"))
 
 # --- Session filter ---
@@ -88,10 +90,11 @@ BLOCKED_HOURS_LOCAL = [
 MIN_SAMPLE_PER_HOUR = int(os.getenv("MIN_SAMPLE_PER_HOUR", "10"))
 
 # --- Cooldowns ---
-POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "15"))
-REENTRY_COOLDOWN_CANDLES = int(os.getenv("REENTRY_COOLDOWN_CANDLES", "0"))
-SAME_SIDE_LOSS_PAUSE_COUNT = int(os.getenv("SAME_SIDE_LOSS_PAUSE_COUNT", "4"))
-SAME_SIDE_LOSS_PAUSE_SEC = int(os.getenv("SAME_SIDE_LOSS_PAUSE_SEC", "300"))
+# Longer cooldown after loss to prevent revenge trading
+POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "120"))
+REENTRY_COOLDOWN_CANDLES = int(os.getenv("REENTRY_COOLDOWN_CANDLES", "3"))
+SAME_SIDE_LOSS_PAUSE_COUNT = int(os.getenv("SAME_SIDE_LOSS_PAUSE_COUNT", "3"))
+SAME_SIDE_LOSS_PAUSE_SEC = int(os.getenv("SAME_SIDE_LOSS_PAUSE_SEC", "600"))
 
 # --- Kill switches ---
 FREEZE_ON_EXTREME_FUNDING = os.getenv("FREEZE_ON_EXTREME_FUNDING", "true").lower() == "true"
@@ -110,20 +113,21 @@ DB_PATH = os.getenv("DB_PATH", "bot_data.db")
 # --- Analytics engine ---
 AUTO_ANALYTICS_ENABLED = os.getenv("AUTO_ANALYTICS_ENABLED", "true").lower() == "true"
 ANALYTICS_RUN_INTERVAL_HOURS = int(os.getenv("ANALYTICS_RUN_INTERVAL_HOURS", "24"))
-MIN_SAMPLE_FOR_RECOMMENDATIONS = int(os.getenv("MIN_SAMPLE_FOR_RECOMMENDATIONS", "50"))
+MIN_SAMPLE_FOR_RECOMMENDATIONS = int(os.getenv("MIN_SAMPLE_FOR_RECOMMENDATIONS", "15"))
 EDGE_DECAY_WINDOW_TRADES = int(os.getenv("EDGE_DECAY_WINDOW_TRADES", "30"))
 EDGE_DECAY_ALERT_THRESHOLD = float(os.getenv("EDGE_DECAY_ALERT_THRESHOLD", "0.50"))
-FEE_EROSION_ALERT_THRESHOLD = float(os.getenv("FEE_EROSION_ALERT_THRESHOLD", "0.40"))
+FEE_EROSION_ALERT_THRESHOLD = float(os.getenv("FEE_EROSION_ALERT_THRESHOLD", "0.25"))
 SKIP_RATE_ALERT_THRESHOLD = float(os.getenv("SKIP_RATE_ALERT_THRESHOLD", "0.95"))
 SKIP_RATE_ALERT_HOURS = int(os.getenv("SKIP_RATE_ALERT_HOURS", "4"))
 
 # --- Position sizing ---
+# Conservative sizing: small positions, let winners compound
 POSITION_SIZING_MODE = os.getenv("POSITION_SIZING_MODE", "fixed_fractional")
-BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "10.0"))
-MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "15.0"))
-QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "2.0"))
-QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.5"))
-QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.2"))
+BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "2.0"))
+MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "5.0"))
+QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "1.5"))
+QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.2"))
+QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.0"))
 STREAK_LOSS_REDUCTION_1 = float(os.getenv("STREAK_LOSS_REDUCTION_1", "0.85"))
 STREAK_LOSS_REDUCTION_2 = float(os.getenv("STREAK_LOSS_REDUCTION_2", "0.70"))
 STREAK_LOSS_REDUCTION_3 = float(os.getenv("STREAK_LOSS_REDUCTION_3", "0.50"))
@@ -148,8 +152,8 @@ DD_TIER_3_MULT = float(os.getenv("DD_TIER_3_MULT", "0.40"))
 DD_HALT_PCT = float(os.getenv("DD_HALT_PCT", "25.0"))
 
 # --- Capital protection ---
-DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "10.0"))
-WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "20.0"))
+DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
+WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "10.0"))
 EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "10"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
 
@@ -176,8 +180,8 @@ JOURNAL_MAX_TOKENS_SKIP_REVIEW = int(os.getenv("JOURNAL_MAX_TOKENS_SKIP_REVIEW",
 # --- Self-optimization (TURBO LEARNING) ---
 AUTONOMOUS_TUNING_ENABLED = os.getenv("AUTONOMOUS_TUNING_ENABLED", "true").lower() == "true"
 TUNING_CYCLE_HOURS = int(os.getenv("TUNING_CYCLE_HOURS", "1"))
-TUNING_LOOKBACK_TRADES = int(os.getenv("TUNING_LOOKBACK_TRADES", "50"))
-TUNING_MIN_SAMPLE = int(os.getenv("TUNING_MIN_SAMPLE", "5"))
+TUNING_LOOKBACK_TRADES = int(os.getenv("TUNING_LOOKBACK_TRADES", "20"))
+TUNING_MIN_SAMPLE = int(os.getenv("TUNING_MIN_SAMPLE", "3"))
 TUNING_MIN_CONFIDENCE_PCT = int(os.getenv("TUNING_MIN_CONFIDENCE_PCT", "60"))
 PROBATION_TRADES = int(os.getenv("PROBATION_TRADES", "8"))
 MAX_CONCURRENT_PROBATIONS = int(os.getenv("MAX_CONCURRENT_PROBATIONS", "4"))
@@ -191,8 +195,8 @@ META_LEARNING_MAX_TOKENS = int(os.getenv("META_LEARNING_MAX_TOKENS", "500"))
 
 # --- Strategy Evolution ---
 STRATEGY_EVOLUTION_ENABLED = os.getenv("STRATEGY_EVOLUTION_ENABLED", "true").lower() == "true"
-STRATEGY_EVOLUTION_HOURS = float(os.getenv("STRATEGY_EVOLUTION_HOURS", "6"))
-STRATEGY_EVOLUTION_MIN_TRADES = int(os.getenv("STRATEGY_EVOLUTION_MIN_TRADES", "5"))
+STRATEGY_EVOLUTION_HOURS = float(os.getenv("STRATEGY_EVOLUTION_HOURS", "3"))
+STRATEGY_EVOLUTION_MIN_TRADES = int(os.getenv("STRATEGY_EVOLUTION_MIN_TRADES", "3"))
 
 # --- Dashboard ---
 ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
@@ -213,6 +217,6 @@ AUTO_EXPORT_RETAIN_DAYS = int(os.getenv("AUTO_EXPORT_RETAIN_DAYS", "90"))
 
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
-MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "50"))
-DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.3"))
+MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "20"))
+DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.35"))
 DEFAULT_SL_PCT = float(os.getenv("DEFAULT_SL_PCT", "0.20"))

@@ -114,7 +114,7 @@ class TradingAgent:
         oi_previous: float | None = None,
         price_new_extreme: bool = False,
         journal_insights: list[dict] | None = None,
-    ) -> tuple[DirectionalLicense, EntryGateResult, Optional[SLTPLevels]]:
+    ) -> tuple[DirectionalLicense, EntryGateResult, Optional[SLTPLevels], "RegimeState", float]:
         """
         Full evaluation cycle:
         1. Check kill switches
@@ -327,7 +327,7 @@ class TradingAgent:
         self,
         license: DirectionalLicense,
         gate_result: EntryGateResult,
-        regime: RegimeState,
+        regime: Optional[RegimeState],
         candles_1m: Sequence[CandleData],
         exit_price: float,
         exit_type: str,

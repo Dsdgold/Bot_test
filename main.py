@@ -763,7 +763,7 @@ async def run_bot(dry_run: bool = False):
                     close_partial_position(pos.direction, pos.qty_btc)
 
                 # Record close
-                if pos.license and pos.gate_result and pos.regime:
+                if pos.license and pos.gate_result:
                     agent.close_trade(
                         pos.license, pos.gate_result, pos.regime,
                         candles_1m, exit_price, exit_type,
@@ -1117,7 +1117,7 @@ async def run_bot(dry_run: bool = False):
                             qty_btc=qty_btc,
                             license=license_result,
                             gate_result=gate_result,
-                            regime=agent.data_collector._last_regime if hasattr(agent.data_collector, '_last_regime') else None,
+                            regime=regime_state,
                             sl_tp=sl_tp,
                         )
                         active_positions[trade_id] = new_pos

@@ -447,7 +447,7 @@ class DataCollector:
                 ind["cvd_value"], int(gate_result.cvd_ok),
                 oi_current, oi_change_pct, int(gate_result.oi_ok),
                 funding_rate, None,  # orderbook_imbalance — needs L2 data
-                regime.regime.value, license.htf_alignment.value,
+                regime.regime.value if regime else "UNKNOWN", license.htf_alignment.value,
                 license.setup_type.value, license.entry_quality, license.confidence,
                 ind.get("extension_atr_raw", 0) or 0,
                 "AI", sl_tp.entry_type if sl_tp else None,
@@ -538,7 +538,7 @@ class DataCollector:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 self._now_iso(), price, ind["atr_1m"], ind["volume_ratio"],
-                regime.regime.value, ind["adx"], ind["chop_index"],
+                regime.regime.value if regime else "UNKNOWN", ind["adx"], ind["chop_index"],
                 ind["cvd_value"], oi_current, funding_rate, spread, ind["bb_width"],
             ),
         )
