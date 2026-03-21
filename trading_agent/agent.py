@@ -143,11 +143,12 @@ class TradingAgent:
             license = _wait_license(f"Kill switch active: {'; '.join(kill_state.reasons())}")
             gate_result = EntryGateResult(passed=False)
             gate_result.add_block(f"Kill switch: {'; '.join(kill_state.reasons())}")
-            self._log_decision(license, gate_result, RegimeState(
+            _empty_regime = RegimeState(
                 regime=Regime.RANGING,
                 adx=0, chop=100, atr_pct=0, bb_width=0, ema_slope=0,
-            ), kill_state=kill_state)
-            return license, gate_result, None
+            )
+            self._log_decision(license, gate_result, _empty_regime, kill_state=kill_state)
+            return license, gate_result, None, _empty_regime, 0.0
 
         # Step 2: Regime classification
         regime = classify_regime(candles_1m)
@@ -173,7 +174,7 @@ class TradingAgent:
                 candles_1m, regime, spread, funding_rate, oi_current,
             )
             self.data_collector.save_equity_snapshot(self.equity)
-            return license, gate_result, None
+            return license, gate_result, None, regime, 0.0
 
         # Step 3: Build indicator summary for AI
         indicators = {}
@@ -215,7 +216,7 @@ class TradingAgent:
                     license, gate_result, regime,
                     kill_state=kill_state, vol_ratio=vol_ratio, ext_atr=ext_atr,
                 )
-                return license, gate_result, None
+                return license, gate_result, None, regime, vol_ratio
 
         # Step 5: Apply deterministic entry gates (incl. CVD, OI, session)
         gate_result = evaluate_entry_gates(
@@ -316,7 +317,7 @@ class TradingAgent:
         # Equity snapshot (periodic)
         self.data_collector.save_equity_snapshot(self.equity)
 
-        return license, gate_result, sl_tp
+        return license, gate_result, sl_tp, regime, vol_ratio
 
     def update_price_tick(self, current_price: float) -> None:
         """Update MFE/MAE with new price tick during an open position."""

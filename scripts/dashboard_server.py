@@ -618,12 +618,19 @@ async function refresh(){
 
     // Journal sidebar
     const jList = document.getElementById('journalList');
-    if(jList) jList.innerHTML = (journal.entries||[]).map(e=>{
+    if(jList) jList.innerHTML = (journal.entries||[]).filter(e=>{
+      // Hide empty skip reviews that add no learning value
+      if(e.entry_type==='POST_SKIP_REVIEW'){
+        const obs=e.observation||'';
+        if(obs.includes('0/0 (0%)') || obs.includes('Top reasons: {}'))return false;
+      }
+      return true;
+    }).map(e=>{
       const cls = ICONS[e.entry_type]||'icon-skip';
       const label = LABELS[e.entry_type]||e.entry_type;
       const time = utcToLocal(e.timestamp_utc);
-      const obs = (e.observation||'').substring(0,120);
-      const conc = (e.conclusion||'').substring(0,100);
+      const obs = (e.observation||'').substring(0,200);
+      const conc = (e.conclusion||'').substring(0,150);
       return '<div class="journal-entry"><span class="time">'+time+'</span> '+
         '<span class="'+cls+'">'+label+'</span> '+obs+
         (conc?' &mdash; <em>'+conc+'</em>':'')+'</div>';

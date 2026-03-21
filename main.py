@@ -753,7 +753,7 @@ async def run_bot(dry_run: bool = False):
             journal_entries = journal.get_recent_entries(limit=10)
 
             # ── Evaluate market (with journal context) ──
-            license_result, gate_result, sl_tp = await agent.evaluate_market(
+            license_result, gate_result, sl_tp, regime_state, vol_ratio = await agent.evaluate_market(
                 candles_1m=candles_1m,
                 candles_5m=candles_5m,
                 candles_15m=candles_15m,
@@ -824,8 +824,8 @@ async def run_bot(dry_run: bool = False):
                     logger.warning(f"Meta-learning error: {e}")
                 last_meta_learning = time.time()
 
-            # ── Record cycle observation to journal (every 5 cycles) ──
-            if cycle % 5 == 0:
+            # ── Record cycle observation to journal (every 3 cycles) ──
+            if cycle % 3 == 0:
                 journal.record_cycle_observation(
                     cycle=cycle,
                     price=price,
@@ -836,6 +836,9 @@ async def run_bot(dry_run: bool = False):
                     ai_reason=license_result.reason if hasattr(license_result, 'reason') else "",
                     gate_passed=gate_result.passed,
                     gate_reasons=gate_result.reasons if hasattr(gate_result, 'reasons') else [],
+                    adx=regime_state.adx if regime_state else 0,
+                    chop=regime_state.chop if regime_state else 0,
+                    volume_ratio=vol_ratio,
                     num_open_positions=len(active_positions),
                 )
 

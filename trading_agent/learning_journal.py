@@ -196,24 +196,62 @@ class LearningJournal:
         num_open_positions: int = 0,
     ) -> int:
         """Record bot's analysis and thought process every cycle for learning."""
-        observation = (
-            f"Cycle {cycle} | ${price:.0f} | {regime} | "
-            f"ADX={adx:.1f} CHOP={chop:.1f} Vol={volume_ratio:.2f}x | "
-            f"Open positions: {num_open_positions}\n"
-            f"AI decision: {action} (conf={confidence}, quality={entry_quality})\n"
-            f"AI reasoning: {ai_reason[:300]}"
-        )
+        # Build indicator assessment
+        indicators = []
+        if adx > 0:
+            if adx > 40:
+                indicators.append(f"ADX={adx:.1f} (STRONG trend)")
+            elif adx > 25:
+                indicators.append(f"ADX={adx:.1f} (moderate trend)")
+            else:
+                indicators.append(f"ADX={adx:.1f} (weak/no trend)")
+        if chop > 0:
+            if chop > 60:
+                indicators.append(f"CHOP={chop:.1f} (choppy, avoid)")
+            elif chop < 40:
+                indicators.append(f"CHOP={chop:.1f} (trending, good)")
+            else:
+                indicators.append(f"CHOP={chop:.1f} (neutral)")
+        if volume_ratio > 0:
+            if volume_ratio > 1.5:
+                indicators.append(f"Vol={volume_ratio:.2f}x (HIGH — conviction)")
+            elif volume_ratio < 0.3:
+                indicators.append(f"Vol={volume_ratio:.2f}x (DEAD — avoid)")
+            else:
+                indicators.append(f"Vol={volume_ratio:.2f}x (normal)")
 
+        indicator_str = " | ".join(indicators) if indicators else "No indicators"
+
+        # Build conclusion with analysis
+        conclusions = []
         if gate_passed:
-            conclusion = f"Signal PASSED gates — {action} executed"
+            conclusions.append(f"TRADE {action} executed (conf={confidence}, quality={entry_quality})")
+        elif action == "WAIT":
+            conclusions.append(f"AI says WAIT — no clear edge (conf={confidence})")
         else:
-            conclusion = f"Signal BLOCKED: {'; '.join(gate_reasons[:3])}"
+            conclusions.append(f"{action} signal BLOCKED: {'; '.join(gate_reasons[:3])}")
+
+        if adx > 40 and chop < 40:
+            conclusions.append("Strong trending conditions — good for continuation trades")
+        elif adx < 20 and chop > 60:
+            conclusions.append("Choppy market — should avoid entries")
+        if volume_ratio < 0.1:
+            conclusions.append("Extremely low volume — market lacks conviction")
+        if num_open_positions > 0:
+            conclusions.append(f"{num_open_positions} position(s) open — monitoring")
+
+        observation = (
+            f"${price:.0f} | {regime} | {indicator_str} | "
+            f"Positions: {num_open_positions}\n"
+            f"AI: {action} conf={confidence} quality={entry_quality}\n"
+            f"Reasoning: {ai_reason[:400]}"
+        )
 
         return self._insert(
             entry_type="CYCLE_OBSERVATION",
-            trigger=f"Cycle {cycle}: {action} @ ${price:.0f}",
+            trigger=f"#{cycle} {action} @ ${price:.0f} | {indicator_str}",
             observation=observation,
-            conclusion=conclusion,
+            conclusion=" | ".join(conclusions),
             confidence=confidence,
         )
 
