@@ -202,6 +202,9 @@ def create_app() -> "FastAPI":
     @app.get("/api/candles")
     async def candles(interval: str = "15", limit: int = 200):
         """Fetch candles from Bybit for the chart."""
+        symbol = getattr(config, "SYMBOL", "BTCUSDT")
+        category = getattr(config, "CATEGORY", "linear")
+        # Try pybit first, fall back to public REST API (no auth needed for kline)
         try:
             from pybit.unified_trading import HTTP
             session = HTTP(
@@ -210,13 +213,26 @@ def create_app() -> "FastAPI":
                 api_secret=config.BYBIT_API_SECRET,
             )
             result = session.get_kline(
-                category=config.CATEGORY,
-                symbol=config.SYMBOL,
+                category=category,
+                symbol=symbol,
                 interval=interval,
                 limit=limit,
             )
+            raw_list = result["result"]["list"]
+        except Exception:
+            # Fallback: public Bybit v5 REST API (no pybit needed)
+            import urllib.request, json as _json
+            base = "https://api-testnet.bybit.com" if getattr(config, "BYBIT_TESTNET", False) else "https://api.bybit.com"
+            url = f"{base}/v5/market/kline?category={category}&symbol={symbol}&interval={interval}&limit={limit}"
+            try:
+                with urllib.request.urlopen(url, timeout=10) as resp:
+                    data = _json.loads(resp.read())
+                raw_list = data["result"]["list"]
+            except Exception as e2:
+                return {"candles": [], "error": str(e2)}
+        try:
             out = []
-            for item in reversed(result["result"]["list"]):
+            for item in reversed(raw_list):
                 out.append({
                     "time": int(item[0]) // 1000,
                     "open": float(item[1]),
@@ -225,9 +241,7 @@ def create_app() -> "FastAPI":
                     "close": float(item[4]),
                     "volume": float(item[5]),
                 })
-            return {"candles": out, "symbol": config.SYMBOL}
-        except ImportError:
-            return {"candles": [], "error": "pybit not installed"}
+            return {"candles": out, "symbol": symbol}
         except Exception as e:
             return {"candles": [], "error": str(e)}
 
