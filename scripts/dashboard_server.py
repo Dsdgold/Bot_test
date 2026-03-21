@@ -558,6 +558,12 @@ async function initChart(){
   window.addEventListener('resize',()=>{if(chart)chart.resize(el.clientWidth,280)});
 }
 
+function utcToLocal(utcStr){
+  if(!utcStr)return '';
+  const d=new Date(utcStr.endsWith('Z')?utcStr:utcStr+'Z');
+  return d.toLocaleString([],{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
 async function refreshChart(){
   if(!candleSeries) return;
   try{
@@ -610,7 +616,8 @@ async function refresh(){
     if(jList) jList.innerHTML = (journal.entries||[]).map(e=>{
       const cls = ICONS[e.entry_type]||'icon-skip';
       const label = LABELS[e.entry_type]||e.entry_type;
-      const time = (e.timestamp_utc||'').substring(11,16);
+      const utcStr = e.timestamp_utc||'';
+      const time = utcStr ? new Date(utcStr.endsWith('Z')?utcStr:utcStr+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
       const obs = (e.observation||'').substring(0,120);
       const conc = (e.conclusion||'').substring(0,100);
       return '<div class="journal-entry"><span class="time">'+time+'</span> '+
@@ -709,7 +716,7 @@ async function loadHistory(){
     trades.forEach(t=>{
       const pnl = t.net_pnl_usd||0;
       const cls = pnl>=0?'td-pos':'td-neg';
-      html+='<tr><td>'+(t.timestamp_utc||'').substring(0,16)+'</td><td>'+(t.trade_id||'-')+'</td>'+
+      html+='<tr><td>'+utcToLocal(t.timestamp_utc)+'</td><td>'+(t.trade_id||'-')+'</td>'+
         '<td>'+t.decision+'</td><td>'+(t.exit_price||'-')+'</td>'+
         '<td class="'+cls+'">$'+pnl.toFixed(2)+'</td>'+
         '<td>'+(t.hold_duration_sec||'-')+'s</td>'+
@@ -731,7 +738,7 @@ async function loadFullJournal(){
     let html='<table class="data"><thead><tr><th>Time</th><th>Type</th><th>Observation</th><th>Conclusion</th><th>Action</th></tr></thead><tbody>';
     entries.forEach(e=>{
       const cls = ICONS[e.entry_type]||'';
-      html+='<tr><td>'+(e.timestamp_utc||'').substring(0,16)+'</td>'+
+      html+='<tr><td>'+utcToLocal(e.timestamp_utc)+'</td>'+
         '<td><span class="'+cls+'">'+(LABELS[e.entry_type]||e.entry_type)+'</span></td>'+
         '<td>'+(e.observation||'-')+'</td>'+
         '<td>'+(e.conclusion||'-')+'</td>'+
@@ -751,7 +758,7 @@ async function loadTuning(){
     if(!hist.length){document.getElementById('tuningTable').innerHTML='<p style="color:#666">No tuning history yet</p>';return;}
     let html='<table class="data"><thead><tr><th>Time</th><th>Parameter</th><th>Old</th><th>New</th><th>Trigger</th><th>Status</th></tr></thead><tbody>';
     hist.forEach(h=>{
-      html+='<tr><td>'+(h.timestamp_utc||'').substring(0,16)+'</td>'+
+      html+='<tr><td>'+utcToLocal(h.timestamp_utc)+'</td>'+
         '<td>'+h.parameter_name+'</td>'+
         '<td>'+h.old_value+'</td><td>'+h.new_value+'</td>'+
         '<td>'+(h.trigger||'-')+'</td>'+
