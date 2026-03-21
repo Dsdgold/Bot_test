@@ -201,10 +201,13 @@ def create_app() -> "FastAPI":
 
     @app.get("/api/candles")
     async def candles(interval: str = "15", limit: int = 200):
-        """Fetch candles from Bybit for the chart."""
+        """Fetch candles for the chart. Tries pybit → Bybit REST → OKX fallback."""
+        import urllib.request, json as _json
         symbol = getattr(config, "SYMBOL", "BTCUSDT")
         category = getattr(config, "CATEGORY", "linear")
-        # Try pybit first, fall back to public REST API (no auth needed for kline)
+        raw_list = None
+
+        # 1) Try pybit
         try:
             from pybit.unified_trading import HTTP
             session = HTTP(
@@ -213,23 +216,51 @@ def create_app() -> "FastAPI":
                 api_secret=config.BYBIT_API_SECRET,
             )
             result = session.get_kline(
-                category=category,
-                symbol=symbol,
-                interval=interval,
-                limit=limit,
+                category=category, symbol=symbol,
+                interval=interval, limit=limit,
             )
             raw_list = result["result"]["list"]
         except Exception:
-            # Fallback: public Bybit v5 REST API (no pybit needed)
-            import urllib.request, json as _json
-            base = "https://api-testnet.bybit.com" if getattr(config, "BYBIT_TESTNET", False) else "https://api.bybit.com"
-            url = f"{base}/v5/market/kline?category={category}&symbol={symbol}&interval={interval}&limit={limit}"
+            pass
+
+        # 2) Fallback: Bybit public REST
+        if not raw_list:
             try:
-                with urllib.request.urlopen(url, timeout=10) as resp:
+                base = "https://api-testnet.bybit.com" if getattr(config, "BYBIT_TESTNET", False) else "https://api.bybit.com"
+                url = f"{base}/v5/market/kline?category={category}&symbol={symbol}&interval={interval}&limit={limit}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
                     data = _json.loads(resp.read())
                 raw_list = data["result"]["list"]
-            except Exception as e2:
-                return {"candles": [], "error": str(e2)}
+            except Exception:
+                pass
+
+        # 3) Fallback: OKX public API (works from Hetzner)
+        if not raw_list:
+            try:
+                # OKX bar format: 1m, 3m, 5m, 15m, 1H etc.
+                okx_bar = interval + "m" if interval.isdigit() and int(interval) < 60 else interval
+                okx_url = f"https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar={okx_bar}&limit={limit}"
+                req = urllib.request.Request(okx_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = _json.loads(resp.read())
+                okx_data = data.get("data", [])
+                # OKX format: [ts, open, high, low, close, vol, ...]
+                out = []
+                for item in reversed(okx_data):
+                    out.append({
+                        "time": int(item[0]) // 1000,
+                        "open": float(item[1]),
+                        "high": float(item[2]),
+                        "low": float(item[3]),
+                        "close": float(item[4]),
+                        "volume": float(item[5]),
+                    })
+                return {"candles": out, "symbol": symbol}
+            except Exception as e:
+                return {"candles": [], "error": f"All sources failed: {e}"}
+
+        # Parse Bybit format
         try:
             out = []
             for item in reversed(raw_list):
