@@ -1,5 +1,10 @@
 # ScraperBot exports
 exports/*.csv
+exports/
+
+# Trading bot data
+*.db
+bot_data.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
