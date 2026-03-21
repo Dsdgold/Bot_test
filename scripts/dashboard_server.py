@@ -378,6 +378,7 @@ body{font-family:'Courier New',monospace;background:#0a0a0a;color:#e0e0e0;height
 .icon-skip{color:#4488ff}.icon-tune{color:#ffaa00}
 .icon-rollback{color:#ff6600}.icon-regime{color:#aa66ff}
 .icon-manual{color:#ff88ff}
+.icon-paper{color:#ffdd44}.icon-cycle{color:#66cccc}
 .perf-row{display:grid;grid-template-columns:60px 1fr;gap:4px;font-size:11px;padding:3px 0;border-bottom:1px solid #1a1a1a}
 .perf-label{color:#888}
 /* Subpages */
@@ -497,10 +498,11 @@ const REFRESH = """ + str(config.DASHBOARD_REFRESH_SEC * 1000) + """;
 const ICONS = {POST_WIN:'icon-win',POST_LOSS:'icon-loss',POST_SKIP_REVIEW:'icon-skip',
   TUNING_CYCLE:'icon-tune',ROLLBACK:'icon-rollback',REGIME_SHIFT:'icon-regime',
   EDGE_DECAY:'icon-loss',META_LEARNING:'icon-tune',PARAMETER_INSIGHT:'icon-tune',
-  MANUAL_OWNER:'icon-manual'};
+  MANUAL_OWNER:'icon-manual',PAPER_TRADE:'icon-paper',CYCLE_OBSERVATION:'icon-cycle'};
 const LABELS = {POST_WIN:'WIN',POST_LOSS:'LOSS',POST_SKIP_REVIEW:'SKIP',
   TUNING_CYCLE:'TUNING',ROLLBACK:'ROLLBACK',REGIME_SHIFT:'REGIME',
-  EDGE_DECAY:'EDGE',META_LEARNING:'META',PARAMETER_INSIGHT:'INSIGHT'};
+  EDGE_DECAY:'EDGE',META_LEARNING:'META',PARAMETER_INSIGHT:'INSIGHT',
+  PAPER_TRADE:'PAPER',CYCLE_OBSERVATION:'CYCLE'};
 
 let currentPage = 'monitor';
 let chart = null, candleSeries = null, emaSeries = null;
@@ -560,8 +562,11 @@ async function initChart(){
 
 function utcToLocal(utcStr){
   if(!utcStr)return '';
-  const d=new Date(utcStr.endsWith('Z')?utcStr:utcStr+'Z');
-  return d.toLocaleString([],{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+  let s=utcStr;
+  if(!s.endsWith('Z')&&!s.includes('+'))s+='Z';
+  const d=new Date(s);
+  if(isNaN(d))return utcStr.substring(11,16);
+  return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 }
 
 async function refreshChart(){
@@ -616,8 +621,7 @@ async function refresh(){
     if(jList) jList.innerHTML = (journal.entries||[]).map(e=>{
       const cls = ICONS[e.entry_type]||'icon-skip';
       const label = LABELS[e.entry_type]||e.entry_type;
-      const utcStr = e.timestamp_utc||'';
-      const time = utcStr ? new Date(utcStr.endsWith('Z')?utcStr:utcStr+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+      const time = utcToLocal(e.timestamp_utc);
       const obs = (e.observation||'').substring(0,120);
       const conc = (e.conclusion||'').substring(0,100);
       return '<div class="journal-entry"><span class="time">'+time+'</span> '+

@@ -582,13 +582,14 @@ async def run_bot(dry_run: bool = False):
             for pt in paper_closed:
                 won = "WIN" if pt["pnl"] > 0 else "LOSS"
                 blocked = " (was BLOCKED)" if pt["was_blocked"] else ""
+                rr = abs(pt['mfe'] / pt['mae']) if pt['mae'] > 0 else 0
                 journal._insert(
-                    entry_type="POST_SKIP_REVIEW",
-                    trigger=f"Paper trade {pt['exit_type']}",
+                    entry_type="PAPER_TRADE",
+                    trigger=f"PAPER {pt['direction']} {pt['exit_type']}: ${pt['pnl']:+.1f}{blocked}",
                     observation=(
                         f"WHAT-IF {pt['direction']}{blocked}: entry=${pt['entry_price']:.0f} "
                         f"exit=${pt['exit_price']:.0f} → {won} ${pt['pnl']:+.1f} "
-                        f"in {pt['hold_sec']}s | MFE=${pt['mfe']:.1f} MAE=${pt['mae']:.1f} | "
+                        f"in {pt['hold_sec']}s | MFE=${pt['mfe']:.1f} MAE=${pt['mae']:.1f} R:R={rr:.1f} | "
                         f"conf={pt['confidence']} quality={pt['quality']} regime={pt['regime']}"
                     ),
                     conclusion=(
@@ -929,25 +930,41 @@ async def run_bot(dry_run: bool = False):
                 skip_tracker.record_skip(gate_result.reasons if gate_result.reasons else ["WAIT"])
 
                 # ── Paper trade: "what if I had traded?" ──
-                if license_result.is_trade and license_result.confidence >= 30:
+                # Open paper trades even with low confidence to build learning data
+                if license_result.action in (Action.LONG, Action.SHORT) and license_result.confidence >= 15:
                     direction = "LONG" if license_result.action == Action.LONG else "SHORT"
                     entry_p = price
                     atr_val = abs(price * 0.003)  # ~0.3% as rough ATR
                     sl_p = entry_p - atr_val if direction == "LONG" else entry_p + atr_val
                     tp_p = entry_p + atr_val * 1.5 if direction == "LONG" else entry_p - atr_val * 1.5
+                    was_blocked = bool(gate_result.reasons)
+                    block_reason = "; ".join(gate_result.reasons[:2]) if gate_result.reasons else "AI WAIT — low confidence"
                     paper_tracker.open_paper_trade(
                         direction=direction, entry_price=entry_p,
                         sl_price=sl_p, tp_price=tp_p,
                         confidence=license_result.confidence,
                         quality=license_result.entry_quality,
                         regime=regime_val,
-                        was_blocked=True,
-                        block_reason="; ".join(gate_result.reasons[:2]) if gate_result.reasons else "AI WAIT",
+                        was_blocked=was_blocked,
+                        block_reason=block_reason,
+                    )
+                    # Record paper trade opening in journal too
+                    journal._insert(
+                        entry_type="PAPER_TRADE",
+                        trigger=f"PAPER OPEN: {direction} @ ${price:.0f} (conf={license_result.confidence})",
+                        observation=(
+                            f"Imaginary {direction} @ ${entry_p:.0f} | SL=${sl_p:.0f} TP=${tp_p:.0f} | "
+                            f"conf={license_result.confidence} quality={license_result.entry_quality} | "
+                            f"regime={regime_val} | reason: {block_reason}\n"
+                            f"AI thinking: {license_result.reason[:200] if hasattr(license_result, 'reason') else 'N/A'}"
+                        ),
+                        conclusion=f"Tracking to see if {direction} would have been profitable",
+                        confidence=license_result.confidence,
                     )
                     logger.info(
                         f"PAPER OPEN: {direction} @ ${price:.0f} "
-                        f"(SL=${sl_p:.0f} TP=${tp_p:.0f}) — blocked by: "
-                        f"{gate_result.reasons[0] if gate_result.reasons else 'AI WAIT'}"
+                        f"(SL=${sl_p:.0f} TP=${tp_p:.0f}) conf={license_result.confidence} | "
+                        f"{block_reason}"
                     )
 
                 if cycle % 10 == 0:
