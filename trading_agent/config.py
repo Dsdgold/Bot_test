@@ -37,8 +37,8 @@ class TradingConfig:
     min_order_usdt: float = 1.0
 
     # Risk management (defaults — AI overrides)
-    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "1.2"))
-    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "3.0"))
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.8"))
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "4.0"))
     trailing_stop_pct: float = 1.0
     max_daily_loss_pct: float = 25.0  # Stop trading after 25% daily loss
     max_open_positions: int = 1
@@ -46,7 +46,7 @@ class TradingConfig:
     # Timing
     candle_interval: str = "Min1"
     analysis_interval: int = 60  # Every 60 seconds — save API costs with Sonnet
-    cooldown_after_trade: int = int(os.getenv("COOLDOWN_AFTER_TRADE", "300"))  # 5 min cooldown to avoid overtrading
+    cooldown_after_trade: int = int(os.getenv("COOLDOWN_AFTER_TRADE", "120"))  # 2 min cooldown — aggressive mode
 
     # Strategy thresholds
     rsi_oversold: float = 30.0
@@ -63,25 +63,15 @@ class TradingConfig:
     volume_spike_multiplier: float = 1.5
 
     # Confidence threshold - minimum score to open a trade (0-100)
-    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "70"))
-
-    # Require strategy and AI to agree on direction (reduces conflicting trades)
-    require_signal_agreement: bool = os.getenv("REQUIRE_SIGNAL_AGREEMENT", "true").lower() == "true"
-
-    # Minimum AI grade to open a trade (A+, A, B, C, D)
-    min_ai_grade: str = os.getenv("MIN_AI_GRADE", "B")
-
-    # Choppy market detection — skip trading if signals flipped too many times recently
-    max_signal_flips: int = int(os.getenv("MAX_SIGNAL_FLIPS", "4"))  # Max direction changes in last 10 signals
-    signal_flip_window: int = int(os.getenv("SIGNAL_FLIP_WINDOW", "10"))  # How many recent signals to check
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "40"))
 
     # Minimum hold time in seconds — prevent closing trades too early
     min_hold_time: int = int(os.getenv("MIN_HOLD_TIME", "120"))
 
     # Progressive profit locking (replaces legacy breakeven/trailing/force-close)
     progressive_stop_enabled: bool = os.getenv("PROGRESSIVE_STOP_ENABLED", "true").lower() == "true"
-    profit_step_net_usd: float = float(os.getenv("PROFIT_STEP_NET_USD", "4.0"))
-    lock_step_net_usd: float = float(os.getenv("LOCK_STEP_NET_USD", "1.0"))
+    profit_step_net_usd: float = float(os.getenv("PROFIT_STEP_NET_USD", "2.0"))
+    lock_step_net_usd: float = float(os.getenv("LOCK_STEP_NET_USD", "0.75"))
     taker_fee_rate: float = float(os.getenv("TAKER_FEE_RATE", "0.00055"))
     slippage_buffer_usd: float = float(os.getenv("SLIPPAGE_BUFFER_USD", "0.40"))
     min_stop_improvement_usd: float = float(os.getenv("MIN_STOP_IMPROVEMENT_USD", "0.25"))

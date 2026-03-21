@@ -62,13 +62,10 @@ class RiskManager:
                 self.loss_streak_pause_until = None
                 self.consecutive_losses = 0
 
-        # Cooldown between trades — config-driven (default 300s = 5min)
+        # Cooldown between trades — 120s minimum
         if self.last_trade_time:
             elapsed = (datetime.now() - self.last_trade_time).total_seconds()
-            cooldown = max(self.config.cooldown_after_trade, 180)  # At least 3 min
-            # After a loss, double the cooldown to avoid revenge trading
-            if self.consecutive_losses > 0:
-                cooldown = cooldown * (1 + self.consecutive_losses * 0.5)
+            cooldown = max(self.config.cooldown_after_trade, 120)
             if elapsed < cooldown:
                 remaining = cooldown - elapsed
                 return False, f"Cooldown: {remaining:.0f}s remaining"
