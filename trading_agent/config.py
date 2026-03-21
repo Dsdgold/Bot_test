@@ -25,10 +25,10 @@ ENABLE_FALLBACK_OVERRIDE = os.getenv("ENABLE_FALLBACK_OVERRIDE", "true").lower()
 # --- Regime filter ---
 REGIME_FILTER_ENABLED = os.getenv("REGIME_FILTER_ENABLED", "true").lower() == "true"
 USE_ADX_FILTER = os.getenv("USE_ADX_FILTER", "true").lower() == "true"
-ADX_MIN = float(os.getenv("ADX_MIN", "14"))
+ADX_MIN = float(os.getenv("ADX_MIN", "10"))
 USE_CHOP_FILTER = os.getenv("USE_CHOP_FILTER", "true").lower() == "true"
-CHOP_MAX = float(os.getenv("CHOP_MAX", "61.8"))
-DEAD_VOL_ATR_PCT_MIN = float(os.getenv("DEAD_VOL_ATR_PCT_MIN", "0.05"))
+CHOP_MAX = float(os.getenv("CHOP_MAX", "80"))
+DEAD_VOL_ATR_PCT_MIN = float(os.getenv("DEAD_VOL_ATR_PCT_MIN", "0.01"))
 SPIKE_CANDLE_ATR_MAX = float(os.getenv("SPIKE_CANDLE_ATR_MAX", "1.5"))
 
 # --- Entry quality gates ---
