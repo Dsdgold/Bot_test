@@ -323,11 +323,11 @@ def create_app() -> "FastAPI":
 
     @app.get("/api/balance")
     async def balance():
-        """Fetch account balance — tries pybit, REST API, then bot's internal tracking."""
-        if not config.BYBIT_API_KEY or not config.BYBIT_API_SECRET:
-            pass  # skip to fallback
-        else:
-            # 1) Try pybit (works on Windows/local)
+        """Fetch account balance — tries pybit then bot's internal tracking."""
+        import logging as _log
+
+        # 1) Try pybit
+        if config.BYBIT_API_KEY and config.BYBIT_API_SECRET:
             try:
                 from pybit.unified_trading import HTTP
                 session = HTTP(
@@ -335,56 +335,36 @@ def create_app() -> "FastAPI":
                     api_key=config.BYBIT_API_KEY,
                     api_secret=config.BYBIT_API_SECRET,
                 )
-                for account_type in ("UNIFIED", "CONTRACT"):
-                    try:
-                        result = session.get_wallet_balance(accountType=account_type)
-                        acct_list = result.get("result", {}).get("list", [])
-                        if not acct_list:
-                            continue
-                        coins = acct_list[0].get("coin", [])
-                        usdt = next((c for c in coins if c["coin"] == "USDT"), None)
-                        if usdt and float(usdt.get("equity", 0)) > 0:
-                            return {
-                                "equity": float(usdt.get("equity", 0)),
-                                "available": float(usdt.get("availableToWithdraw", 0)),
-                                "wallet": float(usdt.get("walletBalance", 0)),
-                                "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)),
-                                "account_type": account_type,
-                            }
-                    except Exception:
-                        continue
-            except ImportError:
-                pass
-            except Exception:
-                pass
+                result = session.get_wallet_balance(accountType="UNIFIED")
+                acct_list = result.get("result", {}).get("list", [])
+                if acct_list:
+                    acct = acct_list[0]
+                    # Try totalEquity first (works for all account types)
+                    total_eq = float(acct.get("totalEquity", 0))
+                    # Also check USDT coin
+                    coins = acct.get("coin", [])
+                    usdt = next((c for c in coins if c["coin"] == "USDT"), None)
+                    equity = float(usdt.get("equity", 0)) if usdt else total_eq
+                    if equity > 0:
+                        return {
+                            "equity": equity,
+                            "available": float(usdt.get("availableToWithdraw", 0)) if usdt else 0,
+                            "wallet": float(usdt.get("walletBalance", 0)) if usdt else equity,
+                            "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)) if usdt else 0,
+                            "account_type": "UNIFIED",
+                        }
+                    elif total_eq > 0:
+                        return {
+                            "equity": total_eq,
+                            "available": 0,
+                            "wallet": total_eq,
+                            "unrealised_pnl": 0,
+                            "account_type": "UNIFIED",
+                        }
+            except Exception as e:
+                _log.getLogger(__name__).warning(f"Balance pybit error: {e}")
 
-            # 2) Try REST API (fallback when pybit not installed)
-            try:
-                for account_type in ("UNIFIED", "CONTRACT"):
-                    try:
-                        result = _bybit_signed_request(
-                            "/v5/account/wallet-balance",
-                            {"accountType": account_type},
-                        )
-                        acct_list = result.get("result", {}).get("list", [])
-                        if not acct_list:
-                            continue
-                        coins = acct_list[0].get("coin", [])
-                        usdt = next((c for c in coins if c["coin"] == "USDT"), None)
-                        if usdt and float(usdt.get("equity", 0)) > 0:
-                            return {
-                                "equity": float(usdt.get("equity", 0)),
-                                "available": float(usdt.get("availableToWithdraw", 0)),
-                                "wallet": float(usdt.get("walletBalance", 0)),
-                                "unrealised_pnl": float(usdt.get("unrealisedPnl", 0)),
-                                "account_type": account_type,
-                            }
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-
-        # Fallback: bot's internal equity tracking
+        # 2) Fallback: bot's internal equity tracking
         try:
             from main import get_shared_equity
             eq = get_shared_equity()
@@ -871,7 +851,7 @@ async function refresh(){
       fetch('/api/positions').then(r=>r.json()),
       fetch('/api/bot-positions').then(r=>r.json()),
     ]);
-    // Balance from Bybit
+    // Balance
     if(bal.equity>0){
       document.getElementById('balance').textContent = '$'+bal.equity.toFixed(2);
       document.getElementById('balance').className = 'val pos';
@@ -880,7 +860,9 @@ async function refresh(){
     }
 
     const eq = status.equity||{};
-    document.getElementById('equity').textContent = '$'+(eq.equity_usdt||0).toFixed(0);
+    // Use live balance for equity display if DB value is stale
+    const eqVal = (eq.equity_usdt && eq.equity_usdt > 0) ? eq.equity_usdt : (bal.equity || 0);
+    document.getElementById('equity').textContent = '$'+eqVal.toFixed(2);
     const dd = eq.drawdown_pct||0;
     const ddEl = document.getElementById('dd');
     ddEl.textContent = dd.toFixed(1)+'%';
