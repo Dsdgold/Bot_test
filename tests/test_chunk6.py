@@ -343,19 +343,25 @@ def test_17_tier2_rollback():
         os.unlink(db)
 
 def test_18_tier3_never_auto():
-    """Test 18: Tier 3 is NEVER auto-applied."""
+    """Test 18: Former Tier 3 params now Tier 2 with strict safety bounds."""
     db = _tmp_db()
+    orig = config.MAX_LEVERAGE
     try:
         opt = SelfOptimizer(db_path=db)
-        orig = config.MAX_LEVERAGE
+        # Value outside max bound (10) must be rejected
         ok, reason = opt.apply_change("MAX_LEVERAGE", 20,
                                        trigger="test", sample_size=100, confidence=90)
-        assert not ok, "Tier 3 should NEVER auto-apply"
+        assert not ok, "Should reject value outside bounds"
         assert config.MAX_LEVERAGE == orig
-        assert "Tier 3" in reason or "recommendation" in reason.lower()
+        # Value within bounds and max_delta should enter probation (Tier 2)
+        ok2, reason2 = opt.apply_change("MAX_LEVERAGE", orig - 1,
+                                         trigger="test", sample_size=100, confidence=90)
+        assert ok2, f"Should accept within bounds: {reason2}"
+        assert "probation" in reason2.lower() or "Tier 2" in reason2
         opt.close()
-        print(f"  PASS: Tier 3 never auto-applied ({reason})")
+        print(f"  PASS: Autonomous with strict bounds ({reason})")
     finally:
+        config.MAX_LEVERAGE = orig
         os.unlink(db)
 
 def test_19_rollback_lockout():

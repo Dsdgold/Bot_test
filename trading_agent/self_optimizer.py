@@ -58,8 +58,8 @@ class ParamSpec:
 
 
 TIER_1_PARAMS = [
-    ParamSpec("MIN_CONFIDENCE", 1, 55, 80, 3, "MIN_CONFIDENCE", True),
-    ParamSpec("TRADE_QUALITY_MIN", 1, 60, 90, 3, "TRADE_QUALITY_MIN", True),
+    ParamSpec("MIN_CONFIDENCE", 1, 40, 80, 5, "MIN_CONFIDENCE", True),
+    ParamSpec("TRADE_QUALITY_MIN", 1, 45, 90, 5, "TRADE_QUALITY_MIN", True),
     ParamSpec("MAX_ENTRY_EXTENSION_ATR", 1, 0.3, 1.2, 0.1, "MAX_ENTRY_EXTENSION_ATR"),
     ParamSpec("MIN_VOLUME_RATIO", 1, 1.0, 2.0, 0.1, "MIN_VOLUME_RATIO"),
     ParamSpec("ADX_MIN", 1, 14, 28, 2, "ADX_MIN"),
@@ -73,16 +73,25 @@ TIER_2_PARAMS = [
     ParamSpec("TARGET_RR_A", 2, 1.0, 2.0, 0.1, "TARGET_RR_A"),
     ParamSpec("ATR_STOP_MULT", 2, 0.7, 1.5, 0.1, "ATR_STOP_MULT"),
     ParamSpec("MIN_NET_RR", 2, 1.0, 1.5, 0.05, "MIN_NET_RR"),
-    ParamSpec("BASE_RISK_PER_TRADE_PCT", 2, 0.5, 2.0, 0.15, "BASE_RISK_PER_TRADE_PCT"),
+    ParamSpec("BASE_RISK_PER_TRADE_PCT", 2, 0.5, 5.0, 0.5, "BASE_RISK_PER_TRADE_PCT"),
     ParamSpec("REVERSAL_QUALITY_MIN", 2, 70, 95, 3, "REVERSAL_QUALITY_MIN", True),
 ]
 
-TIER_3_PARAMS = [
-    "MAX_LEVERAGE", "DAILY_MAX_LOSS_PCT", "WEEKLY_MAX_LOSS_PCT",
-    "EQUITY_FLOOR_USDT", "DD_HALT_PCT", "TIER_1_EQUITY", "TIER_2_EQUITY",
-    "TIER_3_EQUITY", "TIER_4_EQUITY", "ENABLE_FALLBACK_OVERRIDE",
-    "POSITION_SIZING_MODE",
+TIER_2_PARAMS += [
+    # Former Tier 3 — now autonomous with strict safety bounds
+    ParamSpec("MAX_LEVERAGE", 2, 3, 30, 2, "MAX_LEVERAGE", True),
+    ParamSpec("DAILY_MAX_LOSS_PCT", 2, 2.0, 5.0, 0.5, "DAILY_MAX_LOSS_PCT"),
+    ParamSpec("WEEKLY_MAX_LOSS_PCT", 2, 4.0, 10.0, 1.0, "WEEKLY_MAX_LOSS_PCT"),
+    ParamSpec("EQUITY_FLOOR_USDT", 2, 20, 500, 20, "EQUITY_FLOOR_USDT"),
+    ParamSpec("DD_HALT_PCT", 2, 8.0, 15.0, 1.0, "DD_HALT_PCT"),
+    ParamSpec("TIER_1_EQUITY", 2, 500, 5000, 200, "TIER_1_EQUITY"),
+    ParamSpec("TIER_2_EQUITY", 2, 1000, 10000, 500, "TIER_2_EQUITY"),
+    ParamSpec("TIER_3_EQUITY", 2, 2500, 20000, 1000, "TIER_3_EQUITY"),
+    ParamSpec("TIER_4_EQUITY", 2, 5000, 50000, 2000, "TIER_4_EQUITY"),
 ]
+
+# Nothing left in Tier 3 — bot is fully autonomous
+TIER_3_PARAMS: list[str] = []
 
 ALL_PARAM_SPECS = {p.name: p for p in TIER_1_PARAMS + TIER_2_PARAMS}
 
