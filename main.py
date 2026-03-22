@@ -768,7 +768,12 @@ async def run_bot(dry_run: bool = False):
                 else:
                     gross_pnl = (pos.entry_price - exit_price) * pos.qty_btc
 
-                fees = abs(gross_pnl) * config.TAKER_FEE_RATE * 2
+                # Fees based on position notional value (not PnL!)
+                entry_notional = pos.entry_price * pos.qty_btc
+                exit_notional = exit_price * pos.qty_btc
+                entry_fee = entry_notional * config.MAKER_FEE_RATE  # Entry as maker
+                exit_fee = exit_notional * config.TAKER_FEE_RATE    # Exit as taker (SL/TP = market)
+                fees = entry_fee + exit_fee
                 net_pnl = gross_pnl - fees
                 is_win = net_pnl > 0
 
