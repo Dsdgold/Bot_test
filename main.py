@@ -535,11 +535,13 @@ async def run_bot(dry_run: bool = False):
     paper_tracker = PaperTradeTracker()
 
     # Strategy evolution — dynamic prompt management
-    from trading_agent.strategy_evolution import StrategyEvolution
+    from trading_agent.strategy_evolution import StrategyEvolution, DEFAULT_STRATEGY
     from trading_agent.ai_brain import set_system_prompt
     strategy_evo = StrategyEvolution()
-    set_system_prompt(strategy_evo.current_prompt)
-    logger.info(f"Strategy loaded: v{strategy_evo.current_version}")
+    # Always use aggressive default strategy on startup
+    # Strategy evolution tends to make AI too conservative (adding volume/ADX rules)
+    set_system_prompt(DEFAULT_STRATEGY)
+    logger.info(f"Strategy loaded: v{strategy_evo.current_version} (forced aggressive default)")
 
     # Set leverage on Bybit
     if not dry_run:

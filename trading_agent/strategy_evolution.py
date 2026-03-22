@@ -241,7 +241,11 @@ class StrategyEvolution:
 - Keep the prompt concise (no longer than 50% more than current)
 - DO NOT change the JSON output schema
 - DO NOT remove the confidence/entry_quality calibration scales
-- DO improve trading rules, setup grading, and when to trade/wait based on ACTUAL results
+- DO NOT add volume thresholds, ADX thresholds, or other numeric filter rules — those are handled by the deterministic gate system, NOT the AI prompt
+- DO NOT make the strategy more conservative or add more WAIT conditions — the bot already has strict deterministic filters
+- DO improve trading rules, setup grading, and pattern recognition based on ACTUAL results
+- The AI should be AGGRESSIVE about issuing LONG/SHORT signals — let the gate system filter bad ones
+- WAIT should ONLY be used when the market is truly dead or completely chaotic
 - If performance is good (>55% win rate, positive PnL), make smaller changes
 - If performance is bad (<45% win rate, negative PnL), make bigger changes
 

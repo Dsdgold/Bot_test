@@ -799,7 +799,7 @@ function changeInterval(tf){
   initChart();
   // Set auto-refresh interval based on timeframe
   if(chartAutoRefresh) clearInterval(chartAutoRefresh);
-  const refreshMs = tf==='1'?5000 : tf==='3'?10000 : 30000;
+  const refreshMs = tf==='1'?30000 : tf==='3'?60000 : 120000;
   chartAutoRefresh = setInterval(refreshChart, refreshMs);
 }
 
@@ -830,7 +830,7 @@ async function initChart(){
   window.addEventListener('resize',()=>{if(chart)chart.resize(el.clientWidth,280)});
   // Start auto-refresh for chart
   if(chartAutoRefresh) clearInterval(chartAutoRefresh);
-  const refreshMs = chartInterval==='1'?5000 : chartInterval==='3'?10000 : 30000;
+  const refreshMs = chartInterval==='1'?30000 : chartInterval==='3'?60000 : 120000;
   chartAutoRefresh = setInterval(refreshChart, refreshMs);
 }
 
