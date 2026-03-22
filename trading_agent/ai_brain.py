@@ -223,23 +223,23 @@ async def get_directional_license(
         )
 
         response_text = response.content[0].text.strip()
+        license = parse_ai_response(response_text)
 
-        # If response is empty or not JSON, retry once with explicit instruction
-        if not response_text or not response_text.startswith("{"):
-            logger.warning(f"AI returned non-JSON, retrying (got: {response_text[:80]}...)")
+        # If parse failed (empty, prose, etc.), retry once with explicit instruction
+        if license is None and response_text:
+            logger.warning(f"AI response unparseable, retrying (got: {response_text[:80]}...)")
             retry_response = client.messages.create(
                 model=config.LLM_MODEL,
                 max_tokens=512,
                 system=get_system_prompt(),
                 messages=[
                     {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": response_text or "Let me analyze"},
-                    {"role": "user", "content": "Respond with ONLY the JSON object. No text before or after."},
+                    {"role": "assistant", "content": response_text},
+                    {"role": "user", "content": "Respond with ONLY the JSON object. No markdown fences, no text."},
                 ],
             )
             response_text = retry_response.content[0].text.strip()
-
-        license = parse_ai_response(response_text)
+            license = parse_ai_response(response_text)
 
         if license is None:
             return _wait_license("Failed to parse AI response")

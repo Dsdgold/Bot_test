@@ -175,9 +175,10 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[CandleDa
             logger.warning("pybit not installed — run: pip install pybit")
             return []
         except Exception as e:
-            if "rate limit" in str(e).lower() or "10006" in str(e):
-                wait = 2 ** attempt
-                logger.warning(f"Rate limit ({interval}) — waiting {wait}s")
+            err_str = str(e).lower()
+            if "rate limit" in err_str or "10006" in str(e) or "bapi-limit" in err_str:
+                wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                logger.warning(f"Rate limit ({interval}) — waiting {wait}s (attempt {attempt+1}/3)")
                 await asyncio.sleep(wait)
                 continue
             logger.error(f"Failed to fetch candles ({interval}): {e}")
@@ -642,11 +643,11 @@ async def run_bot(dry_run: bool = False):
 
             # ── Fetch data (with rate limit spacing) ──
             candles_1m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_1M, 100)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
             candles_5m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_5M, 50)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
             candles_15m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_15M, 50)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
             candles_1h = await fetch_candles(config.SYMBOL, config.TIMEFRAME_1H, 30)
 
             if not candles_1m:

@@ -74,10 +74,10 @@ TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.0"))
 TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.5"))
 TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.2"))
 MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.5"))
-MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.10"))
-MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.40"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.15"))
-MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.60"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.22"))
+MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.50"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.25"))
+MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.80"))
 
 # --- Session filter ---
 SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").lower() == "true"
