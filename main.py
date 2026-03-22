@@ -614,26 +614,32 @@ async def run_bot(dry_run: bool = False):
     logger.info(f"Strategy loaded: v{strategy_evo.current_version} (forced aggressive default)")
 
     # Set leverage on Bybit
+    # Fetch initial equity from Bybit FIRST (needed for dynamic leverage)
+    initial_equity = await fetch_account_equity()
+    if initial_equity > 0:
+        agent.equity = initial_equity
+
+    # Set leverage based on equity tier
     if not dry_run:
+        from trading_agent.position_sizer import get_max_leverage_for_equity
+        effective_lev = get_max_leverage_for_equity(agent.equity)
         try:
             session = _get_session()
             session.set_leverage(
                 category=config.CATEGORY,
                 symbol=config.SYMBOL,
-                buyLeverage=str(config.MAX_LEVERAGE),
-                sellLeverage=str(config.MAX_LEVERAGE),
+                buyLeverage=str(effective_lev),
+                sellLeverage=str(effective_lev),
             )
-            logger.info(f"Leverage set to {config.MAX_LEVERAGE}x on Bybit")
+            logger.info(
+                f"Leverage set to {effective_lev}x on Bybit "
+                f"(equity=${agent.equity:.2f}, tier={'MICRO' if agent.equity < config.MICRO_EQUITY_THRESHOLD else 'STANDARD'})"
+            )
         except Exception as e:
             if "11043" in str(e):
-                logger.info(f"Leverage already set to {config.MAX_LEVERAGE}x (or position open)")
+                logger.info(f"Leverage already set to {effective_lev}x (or position open)")
             else:
                 logger.warning(f"Could not set leverage: {e}")
-
-    # Fetch initial equity from Bybit
-    initial_equity = await fetch_account_equity()
-    if initial_equity > 0:
-        agent.equity = initial_equity
         logger.info(f"Account equity: ${initial_equity:.2f}")
     else:
         agent.equity = config.POSITION_SIZE_USD * 10
@@ -1191,6 +1197,7 @@ async def run_bot(dry_run: bool = False):
                         skip_tracker.record_skip([f"Direction conflict: {direction} vs {existing_dir}"])
                         continue
 
+                tp_pct_val = sl_tp.tp_pct if sl_tp and hasattr(sl_tp, 'tp_pct') else 0.0
                 pos_result = calculate_position_size(
                     equity=agent.equity,
                     entry_price=entry_price,
@@ -1201,6 +1208,7 @@ async def run_bot(dry_run: bool = False):
                     daily_pnl=daily_pnl,
                     weekly_pnl=weekly_pnl,
                     current_open_positions=len(active_positions),
+                    tp_pct=tp_pct_val,
                 )
 
                 if pos_result.halted:
@@ -1223,8 +1231,9 @@ async def run_bot(dry_run: bool = False):
                                      price * (1.005 if direction == "LONG" else 0.995))
                     logger.info(
                         f"EXECUTING: {action} @ ${price:.1f} | "
-                        f"Size: ${pos_result.size_usd:.2f} | SL: ${sl_price_calc:.2f} | "
-                        f"TP: ${tp_price_calc:.2f}"
+                        f"Size: ${pos_result.size_usd:.2f} ({pos_result.leverage:.1f}x) | "
+                        f"SL: ${sl_price_calc:.2f} | TP: ${tp_price_calc:.2f} | "
+                        f"Est.net: ${pos_result.estimated_net_profit:.2f}"
                     )
 
                     order = place_order(direction, pos_result.size_usd, price)

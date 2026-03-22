@@ -67,17 +67,17 @@ MAKER_FEE_RATE = float(os.getenv("MAKER_FEE_RATE", "0.0002"))
 MAX_SPREAD_TOLERANCE_USDT = float(os.getenv("MAX_SPREAD_TOLERANCE_USDT", "2.5"))
 
 # --- Dynamic SL/TP ---
-# Micro scalping: tight SL, wider TP, aim for 1.5:1+ after fees
+# Wider TP for micro accounts to ensure meaningful profit after fees
 USE_DYNAMIC_SL_TP = os.getenv("USE_DYNAMIC_SL_TP", "true").lower() == "true"
 ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "0.8"))
-TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.0"))
-TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.5"))
-TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.2"))
+TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.5"))
+TARGET_RR_A = float(os.getenv("TARGET_RR_A", "2.0"))
+TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.5"))
 MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.5"))
-MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.22"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.25"))
 MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.50"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.25"))
-MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.80"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.40"))
+MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "1.20"))
 
 # --- Session filter ---
 SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").lower() == "true"
@@ -120,10 +120,12 @@ SKIP_RATE_ALERT_THRESHOLD = float(os.getenv("SKIP_RATE_ALERT_THRESHOLD", "0.95")
 SKIP_RATE_ALERT_HOURS = int(os.getenv("SKIP_RATE_ALERT_HOURS", "4"))
 
 # --- Position sizing ---
-# Conservative micro: protect capital, survive to grow
-POSITION_SIZING_MODE = os.getenv("POSITION_SIZING_MODE", "fixed_fractional")
+# Adaptive: size positions to hit target net profit after fees
+POSITION_SIZING_MODE = os.getenv("POSITION_SIZING_MODE", "adaptive")
 BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "3.0"))
-MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "5.0"))
+MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "6.0"))
+MIN_NET_PROFIT_USD = float(os.getenv("MIN_NET_PROFIT_USD", "1.00"))
+TARGET_NET_PROFIT_USD = float(os.getenv("TARGET_NET_PROFIT_USD", "1.50"))
 QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "1.5"))
 QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.2"))
 QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.0"))
@@ -216,6 +218,11 @@ AUTO_EXPORT_RETAIN_DAYS = int(os.getenv("AUTO_EXPORT_RETAIN_DAYS", "90"))
 
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
-MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "15"))
+# Dynamic leverage: micro accounts need more, large accounts less
+# Actual leverage is computed by position_sizer based on equity
+MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "20"))
+MICRO_EQUITY_THRESHOLD = float(os.getenv("MICRO_EQUITY_THRESHOLD", "100"))
+MICRO_MAX_LEVERAGE = int(os.getenv("MICRO_MAX_LEVERAGE", "20"))
+STANDARD_MAX_LEVERAGE = int(os.getenv("STANDARD_MAX_LEVERAGE", "10"))
 DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.35"))
 DEFAULT_SL_PCT = float(os.getenv("DEFAULT_SL_PCT", "0.20"))

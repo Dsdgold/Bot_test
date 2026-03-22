@@ -30,6 +30,14 @@ class SLTPLevels:
     net_rr: float
     entry_type: str  # "MAKER" or "TAKER"
     details: str = ""
+    sl_price: float = 0.0  # Alias for stop_loss (compat)
+    tp_price: float = 0.0  # Alias for take_profit (compat)
+
+    def __post_init__(self):
+        if self.sl_price == 0.0:
+            self.sl_price = self.stop_loss
+        if self.tp_price == 0.0:
+            self.tp_price = self.take_profit
 
     @property
     def is_valid(self) -> bool:
