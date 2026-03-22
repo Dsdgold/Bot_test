@@ -57,24 +57,25 @@ class ParamSpec:
     is_int: bool = False
 
 
+# Ranges allow BOTH loosening and tightening — bot learns to TRADE MORE when profitable
 TIER_1_PARAMS = [
-    ParamSpec("MIN_CONFIDENCE", 1, 40, 80, 5, "MIN_CONFIDENCE", True),
-    ParamSpec("TRADE_QUALITY_MIN", 1, 45, 90, 5, "TRADE_QUALITY_MIN", True),
-    ParamSpec("MAX_ENTRY_EXTENSION_ATR", 1, 0.3, 1.2, 0.1, "MAX_ENTRY_EXTENSION_ATR"),
-    ParamSpec("MIN_VOLUME_RATIO", 1, 1.0, 2.0, 0.1, "MIN_VOLUME_RATIO"),
-    ParamSpec("ADX_MIN", 1, 14, 28, 2, "ADX_MIN"),
-    ParamSpec("CHOP_MAX", 1, 50, 70, 2, "CHOP_MAX"),
-    ParamSpec("REENTRY_COOLDOWN_CANDLES", 1, 2, 8, 1, "REENTRY_COOLDOWN_CANDLES", True),
-    ParamSpec("POST_LOSS_COOLDOWN_SEC", 1, 300, 1800, 120, "POST_LOSS_COOLDOWN_SEC", True),
+    ParamSpec("MIN_CONFIDENCE", 1, 20, 70, 5, "MIN_CONFIDENCE", True),
+    ParamSpec("TRADE_QUALITY_MIN", 1, 15, 60, 5, "TRADE_QUALITY_MIN", True),
+    ParamSpec("MAX_ENTRY_EXTENSION_ATR", 1, 2.0, 6.0, 0.5, "MAX_ENTRY_EXTENSION_ATR"),
+    ParamSpec("MIN_VOLUME_RATIO", 1, 0.05, 1.0, 0.1, "MIN_VOLUME_RATIO"),
+    ParamSpec("ADX_MIN", 1, 8, 25, 2, "ADX_MIN"),
+    ParamSpec("CHOP_MAX", 1, 55, 85, 3, "CHOP_MAX"),
+    ParamSpec("REENTRY_COOLDOWN_CANDLES", 1, 0, 5, 1, "REENTRY_COOLDOWN_CANDLES", True),
+    ParamSpec("POST_LOSS_COOLDOWN_SEC", 1, 10, 300, 30, "POST_LOSS_COOLDOWN_SEC", True),
 ]
 
 TIER_2_PARAMS = [
-    ParamSpec("TARGET_RR_A_PLUS", 2, 1.2, 2.5, 0.15, "TARGET_RR_A_PLUS"),
-    ParamSpec("TARGET_RR_A", 2, 1.0, 2.0, 0.1, "TARGET_RR_A"),
-    ParamSpec("ATR_STOP_MULT", 2, 0.7, 1.5, 0.1, "ATR_STOP_MULT"),
-    ParamSpec("MIN_NET_RR", 2, 0.3, 1.0, 0.05, "MIN_NET_RR"),
-    ParamSpec("BASE_RISK_PER_TRADE_PCT", 2, 5.0, 15.0, 1.0, "BASE_RISK_PER_TRADE_PCT"),
-    ParamSpec("REVERSAL_QUALITY_MIN", 2, 70, 95, 3, "REVERSAL_QUALITY_MIN", True),
+    ParamSpec("TARGET_RR_A_PLUS", 2, 1.0, 3.0, 0.2, "TARGET_RR_A_PLUS"),
+    ParamSpec("TARGET_RR_A", 2, 0.8, 2.5, 0.15, "TARGET_RR_A"),
+    ParamSpec("ATR_STOP_MULT", 2, 0.5, 1.5, 0.1, "ATR_STOP_MULT"),
+    ParamSpec("MIN_NET_RR", 2, 0.3, 1.5, 0.1, "MIN_NET_RR"),
+    ParamSpec("BASE_RISK_PER_TRADE_PCT", 2, 5.0, 20.0, 2.0, "BASE_RISK_PER_TRADE_PCT"),
+    ParamSpec("REVERSAL_QUALITY_MIN", 2, 30, 80, 5, "REVERSAL_QUALITY_MIN", True),
 ]
 
 TIER_2_PARAMS += [

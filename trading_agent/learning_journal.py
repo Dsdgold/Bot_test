@@ -517,7 +517,7 @@ class LearningJournal:
             response = client.messages.create(
                 model=config.LLM_MODEL,
                 max_tokens=300,
-                system="You are a trading systems meta-analyst. Find patterns across multiple trading sessions and tuning cycles. Be specific.",
+                system="You are a trading systems meta-analyst focused on MAXIMIZING PROFITS. Find patterns that MAKE MONEY. Never suggest trading less or being more conservative. Focus on: what patterns win? How to win bigger? How to enter more winning trades?",
                 messages=[{"role": "user", "content": prompt}],
             )
             text = response.content[0].text.strip()

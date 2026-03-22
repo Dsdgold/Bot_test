@@ -231,11 +231,12 @@ class StrategyEvolution:
 {chr(10).join(journal_summary)}
 
 ## YOUR TASK:
-1. Analyze what's working and what's NOT working in the current strategy
-2. Write an IMPROVED version of the strategy prompt
+1. Analyze what MADE MONEY and what LOST MONEY in the current strategy
+2. Write an IMPROVED version that will MAKE MORE MONEY
 3. Keep the JSON output format EXACTLY the same (action, confidence, regime, setup_type, entry_quality, htf_alignment, reason)
-4. Focus improvements on the areas where the bot is losing money or making mistakes
-5. Be specific — if losses come from reversals, add reversal guidance. If from overtrading in chop, add chop rules.
+4. The #1 goal is MAXIMIZING PROFIT — more winning trades, bigger wins, not fewer trades
+5. If wins came from certain patterns (continuation, pullback) → DOUBLE DOWN on those patterns
+6. If losses came from certain setups → improve timing/direction, DON'T just avoid them
 
 ## RULES:
 - Keep the prompt concise (no longer than 50% more than current)
@@ -263,9 +264,10 @@ Respond with ONLY a JSON object:
                 model=config.LLM_MODEL,
                 max_tokens=4096,
                 system=(
-                    "You are a world-class trading strategy optimizer. "
-                    "You analyze real trade results and improve strategy prompts. "
-                    "Be specific and data-driven. Every change must be justified by the performance data."
+                    "You are a world-class trading strategy optimizer focused on MAXIMIZING PROFIT. "
+                    "Your goal: more trades, more wins, bigger gains. "
+                    "NEVER make the strategy more conservative. ALWAYS look for ways to trade MORE and earn MORE. "
+                    "The bot has deterministic filters for risk — your job is to find profitable patterns."
                 ),
                 messages=[{"role": "user", "content": prompt}],
             )
