@@ -220,14 +220,31 @@ async def get_directional_license(
 
     try:
         import anthropic
+        import asyncio
 
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        response = client.messages.create(
-            model=config.LLM_MODEL,
-            max_tokens=512,
-            system=get_system_prompt(),
-            messages=[{"role": "user", "content": prompt}],
+        client = anthropic.Anthropic(
+            api_key=config.ANTHROPIC_API_KEY,
+            timeout=30.0,  # 30s HTTP timeout (prevents hang)
         )
+
+        # Run LLM call with asyncio timeout (safety net above HTTP timeout)
+        loop = asyncio.get_event_loop()
+        try:
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: client.messages.create(
+                        model=config.LLM_MODEL,
+                        max_tokens=512,
+                        system=get_system_prompt(),
+                        messages=[{"role": "user", "content": prompt}],
+                    ),
+                ),
+                timeout=45.0,  # Hard timeout: 45s total
+            )
+        except asyncio.TimeoutError:
+            logger.warning("AI call timed out (45s) — returning WAIT")
+            return _wait_license("AI call timeout")
 
         response_text = response.content[0].text.strip()
         license = parse_ai_response(response_text)
@@ -235,18 +252,28 @@ async def get_directional_license(
         # If parse failed (empty, prose, etc.), retry once with explicit instruction
         if license is None and response_text:
             logger.warning(f"AI response unparseable, retrying (got: {response_text[:80]}...)")
-            retry_response = client.messages.create(
-                model=config.LLM_MODEL,
-                max_tokens=512,
-                system=get_system_prompt(),
-                messages=[
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": response_text},
-                    {"role": "user", "content": "Respond with ONLY the JSON object. No markdown fences, no text."},
-                ],
-            )
-            response_text = retry_response.content[0].text.strip()
-            license = parse_ai_response(response_text)
+            try:
+                retry_response = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: client.messages.create(
+                            model=config.LLM_MODEL,
+                            max_tokens=512,
+                            system=get_system_prompt(),
+                            messages=[
+                                {"role": "user", "content": prompt},
+                                {"role": "assistant", "content": response_text},
+                                {"role": "user", "content": "Respond with ONLY the JSON object. No markdown fences, no text."},
+                            ],
+                        ),
+                    ),
+                    timeout=30.0,
+                )
+                response_text = retry_response.content[0].text.strip()
+                license = parse_ai_response(response_text)
+            except asyncio.TimeoutError:
+                logger.warning("AI retry timed out — returning WAIT")
+                return _wait_license("AI retry timeout")
 
         if license is None:
             return _wait_license("Failed to parse AI response")

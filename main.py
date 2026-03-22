@@ -202,32 +202,43 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[CandleDa
 
 
 async def fetch_market_data() -> dict:
-    """Fetch spread, funding rate, OI from Bybit."""
+    """Fetch spread, funding rate, OI from Bybit with graceful degradation."""
     data = {"spread": 0.0, "funding_rate": 0.0, "oi_current": None, "oi_previous": None, "latency_ms": 0}
     try:
         session = _get_session()
         start = time.time()
 
-        # Orderbook (spread)
-        ob = session.get_orderbook(category=config.CATEGORY, symbol=config.SYMBOL, limit=1)
+        # Orderbook (spread) — critical, retry once
+        ob = None
+        for attempt in range(2):
+            try:
+                ob = session.get_orderbook(category=config.CATEGORY, symbol=config.SYMBOL, limit=1)
+                break
+            except Exception as e:
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                else:
+                    logger.warning(f"Orderbook fetch failed: {e}")
+
         latency = (time.time() - start) * 1000
         data["latency_ms"] = latency
 
-        bids = ob["result"]["b"]
-        asks = ob["result"]["a"]
-        if bids and asks:
-            data["spread"] = float(asks[0][0]) - float(bids[0][0])
-            data["best_bid"] = float(bids[0][0])
-            data["best_ask"] = float(asks[0][0])
+        if ob:
+            bids = ob["result"]["b"]
+            asks = ob["result"]["a"]
+            if bids and asks:
+                data["spread"] = float(asks[0][0]) - float(bids[0][0])
+                data["best_bid"] = float(bids[0][0])
+                data["best_ask"] = float(asks[0][0])
 
-        # Funding rate
+        # Funding rate — non-critical, single try
         try:
             tickers = session.get_tickers(category=config.CATEGORY, symbol=config.SYMBOL)
             data["funding_rate"] = float(tickers["result"]["list"][0].get("fundingRate", 0))
         except Exception:
             pass
 
-        # Open Interest
+        # Open Interest — non-critical, single try
         try:
             oi = session.get_open_interest(
                 category=config.CATEGORY, symbol=config.SYMBOL,
@@ -668,6 +679,9 @@ class SkipTracker:
 class PaperTradeTracker:
     """Track 'what if I had traded?' simulations for every signal."""
 
+    MAX_PENDING = 50     # Max open paper trades in memory
+    MAX_COMPLETED = 200  # Max completed paper trades in memory
+
     def __init__(self):
         self.pending: list[dict] = []  # Open paper trades
         self.completed: list[dict] = []
@@ -748,7 +762,10 @@ class PaperTradeTracker:
             else:
                 still_open.append(pt)
 
-        self.pending = still_open
+        self.pending = still_open[-self.MAX_PENDING:]  # Cap memory
+        # Cap completed list
+        if len(self.completed) > self.MAX_COMPLETED:
+            self.completed = self.completed[-self.MAX_COMPLETED:]
         return closed
 
     def get_summary(self) -> str:
