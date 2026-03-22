@@ -120,13 +120,13 @@ SKIP_RATE_ALERT_THRESHOLD = float(os.getenv("SKIP_RATE_ALERT_THRESHOLD", "0.95")
 SKIP_RATE_ALERT_HOURS = int(os.getenv("SKIP_RATE_ALERT_HOURS", "4"))
 
 # --- Position sizing ---
-# Aggressive micro: use full equity leverage to make meaningful gains
+# Conservative micro: protect capital, survive to grow
 POSITION_SIZING_MODE = os.getenv("POSITION_SIZING_MODE", "fixed_fractional")
-BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "8.0"))
-MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "12.0"))
-QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "2.0"))
-QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.5"))
-QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.2"))
+BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "3.0"))
+MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "5.0"))
+QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "1.5"))
+QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.2"))
+QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.0"))
 STREAK_LOSS_REDUCTION_1 = float(os.getenv("STREAK_LOSS_REDUCTION_1", "0.85"))
 STREAK_LOSS_REDUCTION_2 = float(os.getenv("STREAK_LOSS_REDUCTION_2", "0.70"))
 STREAK_LOSS_REDUCTION_3 = float(os.getenv("STREAK_LOSS_REDUCTION_3", "0.50"))
@@ -151,9 +151,9 @@ DD_TIER_3_MULT = float(os.getenv("DD_TIER_3_MULT", "0.40"))
 DD_HALT_PCT = float(os.getenv("DD_HALT_PCT", "25.0"))
 
 # --- Capital protection ---
-DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
-WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "10.0"))
-EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "10"))
+DAILY_MAX_LOSS_PCT = float(os.getenv("DAILY_MAX_LOSS_PCT", "8.0"))
+WEEKLY_MAX_LOSS_PCT = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "15.0"))
+EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "5"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
 
 # --- Token optimization ---
@@ -216,6 +216,6 @@ AUTO_EXPORT_RETAIN_DAYS = int(os.getenv("AUTO_EXPORT_RETAIN_DAYS", "90"))
 
 # --- Risk / Position ---
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "100"))
-MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "50"))
+MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "15"))
 DEFAULT_TP_PCT = float(os.getenv("DEFAULT_TP_PCT", "0.35"))
 DEFAULT_SL_PCT = float(os.getenv("DEFAULT_SL_PCT", "0.20"))

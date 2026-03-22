@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 LOOP_INTERVAL_SEC = 30  # 30-second cycle for more micro-trades
 
+# Candle cache to reduce API calls (5m/15m/1h don't change every 30s)
+_candle_cache: dict[str, tuple[float, list]] = {}  # interval → (timestamp, candles)
+CANDLE_CACHE_TTL = {"5": 120, "15": 300, "60": 600, "1": 0}  # seconds per interval
+
 
 # ---------------------------------------------------------------------------
 # Shared state for dashboard (module-level, thread-safe reads)
@@ -148,7 +152,14 @@ def validate_api_keys() -> bool:
 # ---------------------------------------------------------------------------
 
 async def fetch_candles(symbol: str, interval: str, limit: int) -> list[CandleData]:
-    """Fetch candles from Bybit API with rate limit retry."""
+    """Fetch candles from Bybit API with rate limit retry and caching."""
+    # Check cache for higher timeframes
+    cache_ttl = CANDLE_CACHE_TTL.get(interval, 0)
+    if cache_ttl > 0 and interval in _candle_cache:
+        cached_time, cached_candles = _candle_cache[interval]
+        if (time.time() - cached_time) < cache_ttl and cached_candles:
+            return cached_candles
+
     for attempt in range(3):
         try:
             session = _get_session()
@@ -169,6 +180,9 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[CandleDa
                     close=float(item[4]),
                     volume=float(item[5]),
                 ))
+            # Cache higher timeframes
+            if cache_ttl > 0:
+                _candle_cache[interval] = (time.time(), candles)
             return candles
 
         except ImportError:
@@ -253,7 +267,7 @@ async def fetch_account_equity() -> float:
 
 def place_order(direction: str, size_usd: float, price: float) -> dict | None:
     """
-    Place a market order on Bybit.
+    Place an order on Bybit. Uses limit (PostOnly) when preferred, falls back to market.
     direction: 'LONG' or 'SHORT'
     Returns order result dict or None on failure.
     """
@@ -266,6 +280,35 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
             logger.warning(f"Position size too small: ${size_usd:.2f}")
             return None
 
+        # Try limit order first (PostOnly = maker fees only, no taker)
+        if config.PREFER_POST_ONLY_ENTRIES:
+            # Offset price slightly to ensure fill (0.01% inside spread)
+            if direction == "LONG":
+                limit_price = round(price * 0.9999, 2)  # Just below market
+            else:
+                limit_price = round(price * 1.0001, 2)  # Just above market
+
+            try:
+                result = session.place_order(
+                    category=config.CATEGORY,
+                    symbol=config.SYMBOL,
+                    side=side,
+                    orderType="Limit",
+                    qty=str(qty),
+                    price=str(limit_price),
+                    timeInForce="PostOnly",
+                )
+
+                if result.get("retCode") == 0:
+                    order_id = result["result"]["orderId"]
+                    logger.info(f"LIMIT ORDER: {side} {qty} BTC @ ${limit_price:.2f} (PostOnly) | id={order_id}")
+                    return result["result"]
+                else:
+                    logger.warning(f"Limit order rejected: {result.get('retMsg')} — falling back to market")
+            except Exception as e:
+                logger.warning(f"Limit order failed: {e} — falling back to market")
+
+        # Fallback: market order
         result = session.place_order(
             category=config.CATEGORY,
             symbol=config.SYMBOL,
@@ -277,7 +320,7 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
 
         if result.get("retCode") == 0:
             order_id = result["result"]["orderId"]
-            logger.info(f"ORDER PLACED: {side} {qty} BTC @ market | order_id={order_id}")
+            logger.info(f"MARKET ORDER: {side} {qty} BTC @ market | order_id={order_id}")
             return result["result"]
         else:
             logger.error(f"ORDER FAILED: {result.get('retMsg', 'Unknown error')}")
