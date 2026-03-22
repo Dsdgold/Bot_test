@@ -758,9 +758,12 @@ async def run_bot(dry_run: bool = False):
                 net_pnl = gross_pnl - fees
                 is_win = net_pnl > 0
 
-                # Close partial position on exchange
+                # Close partial position on exchange (ignore if already closed by exchange SL)
                 if not dry_run:
-                    close_partial_position(pos.direction, pos.qty_btc)
+                    try:
+                        close_partial_position(pos.direction, pos.qty_btc)
+                    except Exception:
+                        pass  # Exchange SL already closed it
 
                 # Record close
                 if pos.license and pos.gate_result:
@@ -824,6 +827,8 @@ async def run_bot(dry_run: bool = False):
             for tid in closed_ids:
                 del active_positions[tid]
             if closed_ids:
+                last_trade_time = time.time()  # Reset relax timer on close too
+                relax_level = 0
                 _sync_shared_positions(active_positions, price)  # Update after closes (may be empty now)
 
             # Update exchange safety SL if positions remain
@@ -862,31 +867,25 @@ async def run_bot(dry_run: bool = False):
                     continue
 
             # ── Auto-relax: loosen filters if no trades for too long ──
+            # SAFETY: Never re-enable FALLBACK_OVERRIDE or lower critical thresholds
+            # Only relax non-critical filters (candle confirm, CVD, OI)
             mins_since_trade = (time.time() - last_trade_time) / 60
             new_relax = 0
-            if mins_since_trade > 15:
-                new_relax = 3  # ultra
-            elif mins_since_trade > 10:
-                new_relax = 2  # very relaxed
-            elif mins_since_trade > 5:
-                new_relax = 1  # relaxed
+            if mins_since_trade > 30:
+                new_relax = 2  # relaxed (non-critical only)
+            elif mins_since_trade > 15:
+                new_relax = 1  # slightly relaxed
 
             if new_relax != relax_level:
                 relax_level = new_relax
                 if relax_level == 1:
                     config.CANDLE_CLOSE_CONFIRMATION = False
-                    config.REQUIRE_CVD_ALIGNMENT = False
-                    logger.info("AUTO-RELAX L1 (10min no trade): disabled candle confirm + CVD")
+                    logger.info("AUTO-RELAX L1 (15min no trade): disabled candle confirm")
                 elif relax_level == 2:
+                    config.CANDLE_CLOSE_CONFIRMATION = False
+                    config.REQUIRE_CVD_ALIGNMENT = False
                     config.REQUIRE_OI_CONFIRMATION = False
-                    config.MIN_CONFIDENCE = max(35, config.MIN_CONFIDENCE - 10)
-                    config.TRADE_QUALITY_MIN = max(40, config.TRADE_QUALITY_MIN - 10)
-                    logger.info("AUTO-RELAX L2 (20min): disabled OI, lowered confidence/quality")
-                elif relax_level == 3:
-                    config.MIN_CONFIDENCE = max(30, config.MIN_CONFIDENCE - 5)
-                    config.TRADE_QUALITY_MIN = max(30, config.TRADE_QUALITY_MIN - 5)
-                    config.ENABLE_FALLBACK_OVERRIDE = True
-                    logger.info("AUTO-RELAX L3 (30min): ultra-low thresholds, fallback ON")
+                    logger.info("AUTO-RELAX L2 (30min): disabled candle/CVD/OI filters")
                 elif relax_level == 0:
                     # Reset to defaults after a trade
                     config.CANDLE_CLOSE_CONFIRMATION = True
