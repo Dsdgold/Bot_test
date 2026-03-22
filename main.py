@@ -33,7 +33,7 @@ from trading_agent.self_optimizer import SelfOptimizer
 
 logger = logging.getLogger(__name__)
 
-LOOP_INTERVAL_SEC = 15  # 15-second cycle for aggressive scalping
+LOOP_INTERVAL_SEC = 60  # 60-second cycle — balanced between cost and responsiveness
 
 # Candle cache to reduce API calls (5m/15m/1h don't change every 30s)
 _candle_cache: dict[str, tuple[float, list]] = {}  # interval → (timestamp, candles)

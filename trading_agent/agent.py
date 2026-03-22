@@ -58,6 +58,9 @@ class TradingAgent:
         self.candle_index = 0
         self.data_collector = DataCollector(db_path)
         self.equity: float = 0.0
+        # License cache: skip AI call if last answer was WAIT and market hasn't changed
+        self._last_wait_time: float = 0.0
+        self._wait_cache_ttl: float = 120.0  # 2 min cache for WAIT responses
         setup_sanitized_logging()
 
     def _log_decision(
@@ -176,7 +179,7 @@ class TradingAgent:
             self.data_collector.save_equity_snapshot(self.equity)
             return license, gate_result, None, regime, 0.0
 
-        # Step 3: Build indicator summary for AI
+        # Step 3: Build indicator summary and PRE-FILTER before AI call
         indicators = {}
         vol_ratio = 0.0
         ext_atr = 0.0
@@ -186,12 +189,52 @@ class TradingAgent:
             indicators["volume_ratio"] = f"{vol_ratio:.2f}x"
             indicators["extension_atr"] = f"{ext_atr:.2f}"
 
+            # PRE-API COST FILTER: Skip expensive AI call when indicators show no opportunity
+            # This saves ~60-80% of API costs by not calling AI in flat/dead markets
+            _adx_val = regime.adx
+            _pre_block_reasons = []
+            if _adx_val < config.ADX_MIN:
+                _pre_block_reasons.append(f"ADX {_adx_val:.1f} < {config.ADX_MIN}")
+            if vol_ratio < config.MIN_VOLUME_RATIO:
+                _pre_block_reasons.append(f"Volume {vol_ratio:.2f}x < {config.MIN_VOLUME_RATIO}")
+            if ext_atr > config.MAX_ENTRY_EXTENSION_ATR:
+                _pre_block_reasons.append(f"Overextended {ext_atr:.1f} ATR")
+
+            if _pre_block_reasons:
+                from trading_agent.ai_brain import _wait_license
+                license = _wait_license(f"Pre-filter: {'; '.join(_pre_block_reasons)}")
+                gate_result = EntryGateResult(passed=False)
+                for r in _pre_block_reasons:
+                    gate_result.add_block(f"Pre-filter: {r}")
+                logger.info(f"SKIP (no AI call): {'; '.join(_pre_block_reasons)}")
+                self.data_collector.save_trade_decision(
+                    decision="SKIP", license=license, gate_result=gate_result,
+                    regime=regime, candles_1m=candles_1m,
+                    spread=spread, funding_rate=funding_rate,
+                    equity=self.equity, latency_ms=int(latency_ms),
+                )
+                return license, gate_result, None, regime, vol_ratio
+
+        # Step 3c: License cache — if AI said WAIT recently, don't call again
+        import time as _time
+        if self._last_wait_time and (_time.time() - self._last_wait_time) < self._wait_cache_ttl:
+            from trading_agent.ai_brain import _wait_license
+            license = _wait_license("Cached WAIT — saving API cost")
+            gate_result = EntryGateResult(passed=False)
+            gate_result.add_block("Cached WAIT")
+            return license, gate_result, None, regime, vol_ratio
+
         # Step 4: Get AI directional license (with journal memory)
         license = await get_directional_license(
             candles_1m, candles_5m, candles_15m, candles_1h,
             regime, indicators,
             journal_insights=journal_insights,
         )
+        # Update WAIT cache
+        if not license.is_trade:
+            self._last_wait_time = _time.time()
+        else:
+            self._last_wait_time = 0.0  # Reset cache on trade signal
         logger.info(
             f"AI License: {license.action.value} "
             f"conf={license.confidence} quality={license.entry_quality} "

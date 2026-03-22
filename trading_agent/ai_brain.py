@@ -51,7 +51,7 @@ def _format_candles_summary(candles: Sequence[CandleData], label: str) -> str:
     if not candles:
         return f"{label}: no data"
 
-    recent = candles[-5:] if len(candles) >= 5 else candles
+    recent = candles[-3:] if len(candles) >= 3 else candles
     lines = [f"{label} (last {len(recent)} candles):"]
     for c in recent:
         direction = "▲" if c.is_bullish else "▼"
@@ -174,7 +174,7 @@ def _build_journal_context(journal_insights: list[dict] | None = None) -> str:
         "Use these insights to make BETTER decisions. Learn from mistakes.",
         "",
     ]
-    for entry in journal_insights[-8:]:  # Last 8 entries max
+    for entry in journal_insights[-4:]:  # Last 4 entries (cost-optimized)
         etype = entry.get("entry_type", "")
         obs = entry.get("observation", "")[:150]
         conc = entry.get("conclusion", "")[:150]
@@ -235,7 +235,7 @@ async def get_directional_license(
                     None,
                     lambda: client.messages.create(
                         model=config.LLM_MODEL,
-                        max_tokens=512,
+                        max_tokens=256,
                         system=get_system_prompt(),
                         messages=[{"role": "user", "content": prompt}],
                     ),
@@ -258,7 +258,7 @@ async def get_directional_license(
                         None,
                         lambda: client.messages.create(
                             model=config.LLM_MODEL,
-                            max_tokens=512,
+                            max_tokens=256,
                             system=get_system_prompt(),
                             messages=[
                                 {"role": "user", "content": prompt},
