@@ -35,8 +35,8 @@ SPIKE_CANDLE_ATR_MAX = float(os.getenv("SPIKE_CANDLE_ATR_MAX", "2.5"))
 TRADE_QUALITY_MIN = int(os.getenv("TRADE_QUALITY_MIN", "30"))
 REVERSAL_QUALITY_MIN = int(os.getenv("REVERSAL_QUALITY_MIN", "45"))
 MAX_ENTRY_EXTENSION_ATR = float(os.getenv("MAX_ENTRY_EXTENSION_ATR", "4.0"))
-CANDLE_CLOSE_CONFIRMATION = os.getenv("CANDLE_CLOSE_CONFIRMATION", "true").lower() == "true"
-MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.15"))
+CANDLE_CLOSE_CONFIRMATION = os.getenv("CANDLE_CLOSE_CONFIRMATION", "false").lower() == "true"
+MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.01"))
 
 # --- Directional License ---
 LICENSE_VALIDITY_MINUTES = int(os.getenv("LICENSE_VALIDITY_MINUTES", "15"))
@@ -57,7 +57,7 @@ FALLBACK_MIN_QUALITY = int(os.getenv("FALLBACK_MIN_QUALITY", "25"))
 
 # --- Microstructure / order flow ---
 REQUIRE_OI_CONFIRMATION = os.getenv("REQUIRE_OI_CONFIRMATION", "true").lower() == "true"
-REQUIRE_CVD_ALIGNMENT = os.getenv("REQUIRE_CVD_ALIGNMENT", "true").lower() == "true"
+REQUIRE_CVD_ALIGNMENT = os.getenv("REQUIRE_CVD_ALIGNMENT", "false").lower() == "true"
 
 # --- Execution ---
 PREFER_POST_ONLY_ENTRIES = os.getenv("PREFER_POST_ONLY_ENTRIES", "true").lower() == "true"
