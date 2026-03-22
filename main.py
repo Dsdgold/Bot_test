@@ -33,11 +33,11 @@ from trading_agent.self_optimizer import SelfOptimizer
 
 logger = logging.getLogger(__name__)
 
-LOOP_INTERVAL_SEC = 30  # 30-second cycle for more micro-trades
+LOOP_INTERVAL_SEC = 15  # 15-second cycle for aggressive scalping
 
 # Candle cache to reduce API calls (5m/15m/1h don't change every 30s)
 _candle_cache: dict[str, tuple[float, list]] = {}  # interval → (timestamp, candles)
-CANDLE_CACHE_TTL = {"5": 120, "15": 300, "60": 600, "1": 0}  # seconds per interval
+CANDLE_CACHE_TTL = {"5": 60, "15": 180, "60": 600, "1": 0}  # seconds per interval
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +277,7 @@ async def fetch_account_equity() -> float:
 # Order execution
 # ---------------------------------------------------------------------------
 
-LIMIT_ORDER_TIMEOUT_SEC = 10  # Max wait for limit fill before switching to market
+LIMIT_ORDER_TIMEOUT_SEC = 5  # Max wait for limit fill before switching to market (fast scalping)
 
 
 def _check_order_filled(session, order_id: str) -> str:
@@ -736,8 +736,8 @@ class PaperTradeTracker:
                 hit_tp = current_price <= pt["tp_price"]
                 hit_sl = current_price >= pt["sl_price"]
 
-            # Timeout after 30 min
-            timed_out = (time.time() - pt["open_time"]) > 1800
+            # Timeout after 10 min (scalping)
+            timed_out = (time.time() - pt["open_time"]) > 600
 
             if hit_tp or hit_sl or timed_out:
                 if hit_tp:
@@ -1025,12 +1025,12 @@ async def run_bot(dry_run: bool = False):
             # When unrealized profit reaches a threshold, move SL to lock partial profit.
             # E.g. $1.50 profit → SL at +$0.50, $3.00 profit → SL at +$1.00, etc.
             TRAIL_TIERS = [
-                (1.0, 0.30),   # $1.00 profit → lock $0.30
-                (1.5, 0.50),   # $1.50 profit → lock $0.50
-                (2.0, 0.80),   # $2.00 profit → lock $0.80
-                (3.0, 1.50),   # $3.00 profit → lock $1.50
-                (5.0, 3.00),   # $5.00 profit → lock $3.00
-                (8.0, 5.50),   # $8.00 profit → lock $5.50
+                (0.30, 0.10),  # $0.30 profit → lock $0.10
+                (0.50, 0.20),  # $0.50 profit → lock $0.20
+                (0.80, 0.40),  # $0.80 profit → lock $0.40
+                (1.20, 0.70),  # $1.20 profit → lock $0.70
+                (2.00, 1.30),  # $2.00 profit → lock $1.30
+                (3.00, 2.20),  # $3.00 profit → lock $2.20
             ]
             trail_updated = False
             for tid, pos in list(active_positions.items()):
@@ -1081,18 +1081,31 @@ async def run_bot(dry_run: bool = False):
             if trail_updated and active_positions and not dry_run:
                 update_exchange_sl(active_positions)
 
-            # ── Check each active position for SL/TP hit ──
+            # ── Check each active position for SL/TP hit or timeout ──
+            MAX_HOLD_SEC = 300  # 5 min max hold for scalping
             closed_ids: list[str] = []
             for tid, pos in list(active_positions.items()):
                 hit_sl = (price <= pos.sl_price) if pos.direction == "LONG" else (price >= pos.sl_price)
                 hit_tp = (price >= pos.tp_price) if pos.direction == "LONG" else (price <= pos.tp_price)
+                hold_time = time.time() - pos.opened_at
+                hit_timeout = hold_time >= MAX_HOLD_SEC
 
-                if not hit_sl and not hit_tp:
+                if not hit_sl and not hit_tp and not hit_timeout:
                     continue
 
-                # Position hit SL or TP — close it
-                exit_price = pos.sl_price if hit_sl else pos.tp_price
-                exit_type = "SL" if hit_sl else "TP"
+                # Position hit SL, TP, or timeout — close it
+                if hit_sl:
+                    exit_price = pos.sl_price
+                    exit_type = "SL"
+                elif hit_tp:
+                    exit_price = pos.tp_price
+                    exit_type = "TP"
+                else:
+                    exit_price = price
+                    exit_type = "TIMEOUT"
+                    logger.info(
+                        f"TIMEOUT [{tid[:8]}]: {pos.direction} held {int(hold_time)}s — force closing at market"
+                    )
 
                 if pos.direction == "LONG":
                     gross_pnl = (exit_price - pos.entry_price) * pos.qty_btc
@@ -1229,21 +1242,21 @@ async def run_bot(dry_run: bool = False):
             # Only relax non-critical filters (candle confirm, CVD, OI)
             mins_since_trade = (time.time() - last_trade_time) / 60
             new_relax = 0
-            if mins_since_trade > 30:
+            if mins_since_trade > 10:
                 new_relax = 2  # relaxed (non-critical only)
-            elif mins_since_trade > 15:
+            elif mins_since_trade > 5:
                 new_relax = 1  # slightly relaxed
 
             if new_relax != relax_level:
                 relax_level = new_relax
                 if relax_level == 1:
                     config.CANDLE_CLOSE_CONFIRMATION = False
-                    logger.info("AUTO-RELAX L1 (15min no trade): disabled candle confirm")
+                    logger.info("AUTO-RELAX L1 (5min no trade): disabled candle confirm")
                 elif relax_level == 2:
                     config.CANDLE_CLOSE_CONFIRMATION = False
                     config.REQUIRE_CVD_ALIGNMENT = False
                     config.REQUIRE_OI_CONFIRMATION = False
-                    logger.info("AUTO-RELAX L2 (30min): disabled candle/CVD/OI filters")
+                    logger.info("AUTO-RELAX L2 (10min): disabled candle/CVD/OI filters")
                 elif relax_level == 0:
                     # Reset to defaults after a trade
                     config.CANDLE_CLOSE_CONFIRMATION = True

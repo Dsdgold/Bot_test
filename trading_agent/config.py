@@ -69,15 +69,15 @@ MAX_SPREAD_TOLERANCE_USDT = float(os.getenv("MAX_SPREAD_TOLERANCE_USDT", "2.5"))
 # --- Dynamic SL/TP ---
 # Wider TP for micro accounts to ensure meaningful profit after fees
 USE_DYNAMIC_SL_TP = os.getenv("USE_DYNAMIC_SL_TP", "true").lower() == "true"
-ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "0.8"))
-TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.5"))
-TARGET_RR_A = float(os.getenv("TARGET_RR_A", "2.0"))
-TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.5"))
-MIN_NET_RR = float(os.getenv("MIN_NET_RR", "1.0"))
-MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.25"))
-MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.50"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.40"))
-MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "1.20"))
+ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "0.5"))
+TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.0"))
+TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.5"))
+TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.2"))
+MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.8"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.15"))
+MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.30"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.20"))
+MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.60"))
 
 # --- Session filter ---
 SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").lower() == "true"
@@ -90,10 +90,10 @@ MIN_SAMPLE_PER_HOUR = int(os.getenv("MIN_SAMPLE_PER_HOUR", "10"))
 
 # --- Cooldowns ---
 # Quick cooldown: don't block too many opportunities
-POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "30"))
-REENTRY_COOLDOWN_CANDLES = int(os.getenv("REENTRY_COOLDOWN_CANDLES", "1"))
-SAME_SIDE_LOSS_PAUSE_COUNT = int(os.getenv("SAME_SIDE_LOSS_PAUSE_COUNT", "4"))
-SAME_SIDE_LOSS_PAUSE_SEC = int(os.getenv("SAME_SIDE_LOSS_PAUSE_SEC", "300"))
+POST_LOSS_COOLDOWN_SEC = int(os.getenv("POST_LOSS_COOLDOWN_SEC", "10"))
+REENTRY_COOLDOWN_CANDLES = int(os.getenv("REENTRY_COOLDOWN_CANDLES", "0"))
+SAME_SIDE_LOSS_PAUSE_COUNT = int(os.getenv("SAME_SIDE_LOSS_PAUSE_COUNT", "5"))
+SAME_SIDE_LOSS_PAUSE_SEC = int(os.getenv("SAME_SIDE_LOSS_PAUSE_SEC", "120"))
 
 # --- Kill switches ---
 FREEZE_ON_EXTREME_FUNDING = os.getenv("FREEZE_ON_EXTREME_FUNDING", "true").lower() == "true"
@@ -124,8 +124,8 @@ SKIP_RATE_ALERT_HOURS = int(os.getenv("SKIP_RATE_ALERT_HOURS", "4"))
 POSITION_SIZING_MODE = os.getenv("POSITION_SIZING_MODE", "adaptive")
 BASE_RISK_PER_TRADE_PCT = float(os.getenv("BASE_RISK_PER_TRADE_PCT", "3.0"))
 MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "6.0"))
-MIN_NET_PROFIT_USD = float(os.getenv("MIN_NET_PROFIT_USD", "1.00"))
-TARGET_NET_PROFIT_USD = float(os.getenv("TARGET_NET_PROFIT_USD", "1.50"))
+MIN_NET_PROFIT_USD = float(os.getenv("MIN_NET_PROFIT_USD", "0.50"))
+TARGET_NET_PROFIT_USD = float(os.getenv("TARGET_NET_PROFIT_USD", "0.80"))
 QUALITY_SIZE_MULTIPLIER_A_PLUS = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A_PLUS", "1.5"))
 QUALITY_SIZE_MULTIPLIER_A = float(os.getenv("QUALITY_SIZE_MULTIPLIER_A", "1.2"))
 QUALITY_SIZE_MULTIPLIER_B = float(os.getenv("QUALITY_SIZE_MULTIPLIER_B", "1.0"))
@@ -159,7 +159,7 @@ EQUITY_FLOOR_USDT = float(os.getenv("EQUITY_FLOOR_USDT", "5"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
 
 # --- Token optimization ---
-LICENSE_CACHE_TTL_SEC = int(os.getenv("LICENSE_CACHE_TTL_SEC", "60"))
+LICENSE_CACHE_TTL_SEC = int(os.getenv("LICENSE_CACHE_TTL_SEC", "30"))
 LICENSE_CACHE_INVALIDATE_ATR_MOVE = float(os.getenv("LICENSE_CACHE_INVALIDATE_ATR_MOVE", "1.0"))
 LICENSE_CACHE_INVALIDATE_VOL_SPIKE = float(os.getenv("LICENSE_CACHE_INVALIDATE_VOL_SPIKE", "3.0"))
 LLM_MAX_TOKENS_LICENSE = int(os.getenv("LLM_MAX_TOKENS_LICENSE", "200"))
@@ -191,13 +191,13 @@ ROLLBACK_THRESHOLD_PCT = float(os.getenv("ROLLBACK_THRESHOLD_PCT", "20"))
 ROLLBACK_MAX_DD_PCT = float(os.getenv("ROLLBACK_MAX_DD_PCT", "8.0"))
 ROLLBACK_WR_DROP_PCT = float(os.getenv("ROLLBACK_WR_DROP_PCT", "15"))
 LOCKOUT_CYCLES = int(os.getenv("LOCKOUT_CYCLES", "3"))
-META_LEARNING_INTERVAL_HOURS = float(os.getenv("META_LEARNING_INTERVAL_HOURS", "1"))
+META_LEARNING_INTERVAL_HOURS = float(os.getenv("META_LEARNING_INTERVAL_HOURS", "2"))
 META_LEARNING_MAX_TOKENS = int(os.getenv("META_LEARNING_MAX_TOKENS", "500"))
 
 # --- Strategy Evolution ---
 STRATEGY_EVOLUTION_ENABLED = os.getenv("STRATEGY_EVOLUTION_ENABLED", "true").lower() == "true"
-STRATEGY_EVOLUTION_HOURS = float(os.getenv("STRATEGY_EVOLUTION_HOURS", "1"))
-STRATEGY_EVOLUTION_MIN_TRADES = int(os.getenv("STRATEGY_EVOLUTION_MIN_TRADES", "3"))
+STRATEGY_EVOLUTION_HOURS = float(os.getenv("STRATEGY_EVOLUTION_HOURS", "3"))
+STRATEGY_EVOLUTION_MIN_TRADES = int(os.getenv("STRATEGY_EVOLUTION_MIN_TRADES", "8"))
 
 # --- Dashboard ---
 ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
