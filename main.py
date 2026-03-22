@@ -894,7 +894,19 @@ async def run_bot(dry_run: bool = False):
                         f"SL=${sl_p:.2f} TP=${tp_p:.2f}"
                     )
                 if active_positions:
-                    update_exchange_sl(active_positions)
+                    sl_set = False
+                    for attempt in range(3):
+                        if update_exchange_sl(active_positions):
+                            sl_set = True
+                            break
+                        logger.warning(f"Crash recovery SL attempt {attempt + 1}/3 failed")
+                        await asyncio.sleep(2 ** attempt)
+                    if not sl_set:
+                        logger.error(
+                            "CRITICAL: Crash recovery SL failed — closing orphaned positions"
+                        )
+                        close_all_positions()
+                        active_positions.clear()
         except Exception as e:
             logger.warning(f"Crash recovery check failed: {e}")
 
@@ -1121,12 +1133,23 @@ async def run_bot(dry_run: bool = False):
                 net_pnl = gross_pnl - fees
                 is_win = net_pnl > 0
 
-                # Close partial position on exchange (ignore if already closed by exchange SL)
+                # Close partial position on exchange with verification
                 if not dry_run:
-                    try:
-                        close_partial_position(pos.direction, pos.qty_btc)
-                    except Exception:
-                        pass  # Exchange SL already closed it
+                    close_ok = False
+                    for close_attempt in range(3):
+                        try:
+                            if close_partial_position(pos.direction, pos.qty_btc):
+                                close_ok = True
+                                break
+                        except Exception:
+                            pass
+                        if close_attempt < 2:
+                            await asyncio.sleep(1)
+                    if not close_ok:
+                        logger.warning(
+                            f"Position [{tid[:8]}] close failed after 3 attempts — "
+                            "exchange SL should protect"
+                        )
 
                 # Record close
                 if pos.license and pos.gate_result:
@@ -1216,6 +1239,29 @@ async def run_bot(dry_run: bool = False):
             })
             if active_positions:
                 _sync_shared_positions(active_positions, price)
+
+            # ── Hard equity floor & daily loss enforcement ──
+            if active_positions and not dry_run:
+                if agent.equity <= config.EQUITY_FLOOR_USDT:
+                    logger.error(
+                        f"EQUITY FLOOR BREACH: ${agent.equity:.2f} <= "
+                        f"${config.EQUITY_FLOOR_USDT} — closing ALL positions"
+                    )
+                    close_all_positions()
+                    active_positions.clear()
+                    running = False
+                    continue
+                daily_loss_pct = abs(daily_pnl / peak_equity * 100) if daily_pnl < 0 and peak_equity > 0 else 0
+                if daily_loss_pct >= config.DAILY_MAX_LOSS_PCT:
+                    logger.error(
+                        f"DAILY LOSS LIMIT: {daily_loss_pct:.1f}% >= "
+                        f"{config.DAILY_MAX_LOSS_PCT}% — closing ALL positions"
+                    )
+                    close_all_positions()
+                    active_positions.clear()
+                    running = False
+                    continue
+
             if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:
                 # Retry exchange SL if limit order wasn't filled when we first tried
                 any_unprotected = any(not p.exchange_sl_set for p in active_positions.values())
@@ -1534,8 +1580,32 @@ async def run_bot(dry_run: bool = False):
                         )
                         active_positions[trade_id] = new_pos
 
-                        # Set exchange safety SL (widest stop across all positions)
-                        update_exchange_sl(active_positions)
+                        # Set exchange safety SL with retry (CRITICAL for 24/7 safety)
+                        sl_set = False
+                        for sl_attempt in range(3):
+                            if update_exchange_sl(active_positions):
+                                sl_set = True
+                                break
+                            wait_s = 2 ** sl_attempt  # 1s, 2s, 4s
+                            logger.warning(
+                                f"Exchange SL attempt {sl_attempt + 1}/3 failed — "
+                                f"retrying in {wait_s}s"
+                            )
+                            await asyncio.sleep(wait_s)
+
+                        if not sl_set:
+                            logger.error(
+                                "CRITICAL: Exchange SL failed after 3 retries — "
+                                "closing position for safety"
+                            )
+                            try:
+                                close_partial_position(direction, qty_btc)
+                            except Exception:
+                                close_all_positions()
+                            del active_positions[trade_id]
+                            skip_tracker.record_skip(["Exchange SL failed — position closed"])
+                            continue
+
                         _sync_shared_positions(active_positions, price)
                         logger.info(
                             f"Position [{trade_id[:8]}] added | "
@@ -1598,12 +1668,46 @@ async def run_bot(dry_run: bool = False):
 
         except Exception as e:
             logger.error(f"Cycle {cycle} error: {e}", exc_info=True)
-            # On error, check if we still have exchange positions to protect
+            consecutive_errors = getattr(run_bot, '_consecutive_errors', 0) + 1
+            run_bot._consecutive_errors = consecutive_errors
+
+            # On error, protect exchange positions with retry
             if active_positions and not dry_run:
-                try:
-                    update_exchange_sl(active_positions)
-                except Exception:
-                    pass
+                sl_ok = False
+                for attempt in range(3):
+                    try:
+                        if update_exchange_sl(active_positions):
+                            sl_ok = True
+                            break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2 ** attempt)
+
+                if not sl_ok:
+                    logger.error(
+                        "CRITICAL: Cannot set exchange SL after error — "
+                        "closing all positions for safety"
+                    )
+                    try:
+                        close_all_positions()
+                        active_positions.clear()
+                    except Exception as close_err:
+                        logger.error(f"Emergency close failed: {close_err}")
+
+            # Circuit breaker: 10 consecutive errors = halt
+            if consecutive_errors >= 10:
+                logger.error(
+                    f"CIRCUIT BREAKER: {consecutive_errors} consecutive errors — "
+                    "halting bot"
+                )
+                if active_positions and not dry_run:
+                    close_all_positions()
+                    active_positions.clear()
+                running = False
+                continue
+        else:
+            # Reset error counter on successful cycle
+            run_bot._consecutive_errors = 0
 
         # ── Periodic equity re-sync from exchange (every 10 cycles / 5 min) ──
         if cycle % 10 == 0 and not dry_run:
@@ -1628,15 +1732,28 @@ async def run_bot(dry_run: bool = False):
         if running and wait > 0:
             await asyncio.sleep(wait)
 
-    # ── Cleanup ──
+    # ── Cleanup with timeout ──
     logger.info("Bot stopping — cleaning up...")
+    shutdown_start = time.time()
+    SHUTDOWN_TIMEOUT = 30  # Max 30s for cleanup
+
     if active_positions and not dry_run:
         logger.info(f"Closing {len(active_positions)} active position(s) before shutdown")
-        close_all_positions()
+        for attempt in range(3):
+            if close_all_positions():
+                break
+            if time.time() - shutdown_start > SHUTDOWN_TIMEOUT:
+                logger.error("SHUTDOWN TIMEOUT: Could not close positions in 30s")
+                break
+            logger.warning(f"Shutdown close attempt {attempt + 1}/3 failed — retrying")
+            await asyncio.sleep(2)
 
-    journal.close()
-    optimizer.close()
-    agent.data_collector.close()
+    try:
+        journal.close()
+        optimizer.close()
+        agent.data_collector.close()
+    except Exception as e:
+        logger.warning(f"Cleanup error (non-critical): {e}")
     logger.info("Bot stopped")
 
 
