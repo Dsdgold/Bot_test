@@ -71,12 +71,12 @@ MAX_SPREAD_TOLERANCE_USDT = float(os.getenv("MAX_SPREAD_TOLERANCE_USDT", "2.5"))
 USE_DYNAMIC_SL_TP = os.getenv("USE_DYNAMIC_SL_TP", "true").lower() == "true"
 ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "0.5"))
 TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.0"))
-TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.5"))
-TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.2"))
-MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.8"))
-MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.15"))
+TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.8"))
+TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.5"))
+MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.7"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.18"))
 MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.30"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.20"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.30"))
 MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.60"))
 
 # --- Session filter ---
