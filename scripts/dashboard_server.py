@@ -1069,13 +1069,16 @@ async function loadTuning(){
     const d = await r.json();
     const hist = d.history||[];
     if(!hist.length){document.getElementById('tuningTable').innerHTML='<p style="color:#666">No tuning history yet</p>';return;}
-    let html='<table class="data"><thead><tr><th>Time</th><th>Parameter</th><th>Old</th><th>New</th><th>Trigger</th><th>Status</th></tr></thead><tbody>';
+    let html='<table class="data"><thead><tr><th>Time</th><th>Parameter</th><th>Old</th><th>New</th><th>Tier</th><th>Trigger</th><th>Status</th><th>Evidence</th></tr></thead><tbody>';
     hist.forEach(h=>{
+      const statusColor = h.status==='APPLIED'?'#00ff88':h.status==='PROBATION'?'#ffaa00':h.status==='ROLLED_BACK'?'#ff4444':'#888';
       html+='<tr><td>'+utcToLocal(h.timestamp_utc)+'</td>'+
-        '<td>'+h.parameter_name+'</td>'+
-        '<td>'+h.old_value+'</td><td>'+h.new_value+'</td>'+
+        '<td style="color:#00ccff">'+h.parameter_name+'</td>'+
+        '<td style="color:#ff8888">'+h.old_value+'</td><td style="color:#88ff88">'+h.new_value+'</td>'+
+        '<td>T'+(h.tier||'?')+'</td>'+
         '<td>'+(h.trigger||'-')+'</td>'+
-        '<td>'+(h.status||'-')+'</td></tr>';
+        '<td style="color:'+statusColor+'">'+h.status+'</td>'+
+        '<td style="font-size:0.85em;max-width:400px;word-wrap:break-word">'+(h.supporting_evidence||'-')+'</td></tr>';
     });
     html+='</tbody></table>';
     document.getElementById('tuningTable').innerHTML=html;

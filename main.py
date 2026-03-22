@@ -959,6 +959,8 @@ async def run_bot(dry_run: bool = False):
             if (time.time() - last_tuning_cycle) >= tuning_interval:
                 if config.AUTONOMOUS_TUNING_ENABLED:
                     dd_pct = ((peak_equity - agent.equity) / peak_equity * 100) if peak_equity > 0 else 0
+
+                    # Check probations first
                     rollbacks = optimizer.check_probations(
                         current_dd=dd_pct,
                         current_expectancy=daily_pnl,
@@ -968,7 +970,44 @@ async def run_bot(dry_run: bool = False):
                             journal.record_rollback(
                                 rb["param"], rb["reverted_to"], rb["reverted_to"], rb["reason"]
                             )
-                    logger.info(f"Tuning cycle complete. Rollbacks: {len(rollbacks)}")
+
+                    # Run tuning analysis on paper + real trades
+                    paper_total = paper_tracker.paper_wins + paper_tracker.paper_losses
+                    paper_wr = (paper_tracker.paper_wins / paper_total * 100) if paper_total > 0 else 0
+
+                    # Compute avg net_rr from recent completed paper trades
+                    recent_papers = paper_tracker.completed[-30:]
+                    avg_net_rr = 0.0
+                    if recent_papers:
+                        rr_vals = []
+                        for pt in recent_papers:
+                            risk = abs(pt["entry_price"] - pt["sl_price"])
+                            reward = abs(pt["entry_price"] - pt["tp_price"])
+                            if risk > 0:
+                                rr_vals.append(reward / risk)
+                        avg_net_rr = sum(rr_vals) / len(rr_vals) if rr_vals else 0
+
+                    tuning_changes = optimizer.run_tuning_cycle(
+                        paper_trades=paper_tracker.completed,
+                        real_trade_count=optimizer._trade_counter,
+                        daily_pnl=daily_pnl,
+                        win_rate=paper_wr,
+                        drawdown_pct=dd_pct,
+                        avg_net_rr=avg_net_rr,
+                    )
+
+                    if tuning_changes:
+                        for tc in tuning_changes:
+                            journal._insert(
+                                entry_type="PARAMETER_TUNING",
+                                trigger=f"Auto-tuning: {tc['param']}",
+                                observation=f"{tc['param']}: {tc['old']} → {tc['new']}",
+                                conclusion=tc["reason"],
+                                confidence=75,
+                            )
+                        logger.info(f"Tuning cycle: {len(tuning_changes)} changes, {len(rollbacks)} rollbacks")
+                    else:
+                        logger.info(f"Tuning cycle complete. Rollbacks: {len(rollbacks)}")
                 last_tuning_cycle = time.time()
 
             # ── Meta-learner: cross-cycle pattern recognition ──

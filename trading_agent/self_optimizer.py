@@ -391,3 +391,192 @@ class SelfOptimizer:
         conn = self._get_conn()
         row = conn.execute("SELECT COUNT(*) FROM parameter_history").fetchone()
         return row[0] if row else 0
+
+    # ------------------------------------------------------------------
+    # Autonomous tuning engine — analyzes performance and tunes params
+    # ------------------------------------------------------------------
+
+    def run_tuning_cycle(
+        self,
+        paper_trades: list[dict],
+        real_trade_count: int,
+        daily_pnl: float,
+        win_rate: float,
+        drawdown_pct: float,
+        avg_net_rr: float = 0,
+        blocked_reasons: dict | None = None,
+    ) -> list[dict]:
+        """
+        Analyze trade performance and auto-tune parameters.
+        Returns list of changes applied.
+        """
+        if not config.AUTONOMOUS_TUNING_ENABLED:
+            return []
+
+        changes = []
+        sample = len(paper_trades) + real_trade_count
+
+        if sample < config.TUNING_MIN_SAMPLE:
+            logger.debug(f"Tuning: insufficient sample ({sample} < {config.TUNING_MIN_SAMPLE})")
+            return []
+
+        # --- Analyze paper trades for blocked-trade patterns ---
+        blocked = [p for p in paper_trades if p.get("was_blocked")]
+        blocked_wins = [p for p in blocked if p.get("pnl", 0) > 0]
+        blocked_total = len(blocked)
+
+        if blocked_total >= 5:
+            blocked_wr = len(blocked_wins) / blocked_total * 100
+            blocked_avg_pnl = sum(p.get("pnl", 0) for p in blocked) / blocked_total
+
+            # If blocked trades are profitable → we're blocking too much
+            if blocked_wr > 55 and blocked_avg_pnl > 0:
+                # Analyze WHY they were blocked
+                reason_counts: dict[str, int] = {}
+                for p in blocked:
+                    reason = p.get("block_reason", "")
+                    if "Net R:R" in reason:
+                        reason_counts["NET_RR"] = reason_counts.get("NET_RR", 0) + 1
+                    elif "HTF" in reason:
+                        reason_counts["HTF"] = reason_counts.get("HTF", 0) + 1
+                    elif "Volume" in reason:
+                        reason_counts["VOLUME"] = reason_counts.get("VOLUME", 0) + 1
+                    elif "confidence" in reason.lower():
+                        reason_counts["CONFIDENCE"] = reason_counts.get("CONFIDENCE", 0) + 1
+
+                top_blocker = max(reason_counts, key=reason_counts.get) if reason_counts else None
+                evidence = (
+                    f"Blocked trades: {blocked_total} total, WR={blocked_wr:.0f}%, "
+                    f"avg_PnL=${blocked_avg_pnl:.2f}. Top block: {top_blocker} "
+                    f"({reason_counts.get(top_blocker, 0)}x). "
+                    f"These would have been profitable — loosening filters."
+                )
+
+                if top_blocker == "NET_RR":
+                    current = self.get_current_value("MIN_NET_RR")
+                    new_val = max(0.3, current - 0.1)
+                    ok, msg = self.apply_change(
+                        "MIN_NET_RR", new_val,
+                        trigger="BLOCKED_PROFITABLE_TRADES",
+                        evidence=evidence,
+                        sample_size=blocked_total,
+                        confidence=blocked_wr,
+                        drawdown_pct=drawdown_pct,
+                    )
+                    if ok:
+                        changes.append({"param": "MIN_NET_RR", "old": current, "new": new_val, "reason": msg})
+
+                elif top_blocker == "VOLUME":
+                    current = self.get_current_value("MIN_VOLUME_RATIO")
+                    new_val = max(0.05, current - 0.1)
+                    ok, msg = self.apply_change(
+                        "MIN_VOLUME_RATIO", new_val,
+                        trigger="BLOCKED_PROFITABLE_TRADES",
+                        evidence=evidence,
+                        sample_size=blocked_total,
+                        confidence=blocked_wr,
+                        drawdown_pct=drawdown_pct,
+                    )
+                    if ok:
+                        changes.append({"param": "MIN_VOLUME_RATIO", "old": current, "new": new_val, "reason": msg})
+
+                elif top_blocker == "CONFIDENCE":
+                    current = self.get_current_value("MIN_CONFIDENCE")
+                    new_val = max(20, current - 5)
+                    ok, msg = self.apply_change(
+                        "MIN_CONFIDENCE", new_val,
+                        trigger="BLOCKED_PROFITABLE_TRADES",
+                        evidence=evidence,
+                        sample_size=blocked_total,
+                        confidence=blocked_wr,
+                        drawdown_pct=drawdown_pct,
+                    )
+                    if ok:
+                        changes.append({"param": "MIN_CONFIDENCE", "old": current, "new": new_val, "reason": msg})
+
+        # --- Win rate too low → tighten quality filters ---
+        if sample >= 10 and win_rate < 35:
+            current_q = self.get_current_value("TRADE_QUALITY_MIN")
+            new_val = min(60, current_q + 5)
+            evidence = f"Low WR ({win_rate:.0f}%) over {sample} trades — tightening quality filter"
+            ok, msg = self.apply_change(
+                "TRADE_QUALITY_MIN", new_val,
+                trigger="LOW_WIN_RATE",
+                evidence=evidence,
+                sample_size=sample,
+                confidence=100 - win_rate,
+                drawdown_pct=drawdown_pct,
+            )
+            if ok:
+                changes.append({"param": "TRADE_QUALITY_MIN", "old": current_q, "new": new_val, "reason": msg})
+
+        # --- Win rate high → loosen to catch more trades ---
+        if sample >= 10 and win_rate > 60:
+            current_q = self.get_current_value("TRADE_QUALITY_MIN")
+            new_val = max(15, current_q - 5)
+            evidence = f"High WR ({win_rate:.0f}%) over {sample} trades — loosening quality to catch more"
+            ok, msg = self.apply_change(
+                "TRADE_QUALITY_MIN", new_val,
+                trigger="HIGH_WIN_RATE",
+                evidence=evidence,
+                sample_size=sample,
+                confidence=win_rate,
+                drawdown_pct=drawdown_pct,
+            )
+            if ok:
+                changes.append({"param": "TRADE_QUALITY_MIN", "old": current_q, "new": new_val, "reason": msg})
+
+        # --- Drawdown too high → tighten risk ---
+        if drawdown_pct > 10:
+            current_risk = self.get_current_value("BASE_RISK_PER_TRADE_PCT")
+            new_val = max(5.0, current_risk - 2.0)
+            evidence = f"High DD ({drawdown_pct:.1f}%) — reducing risk per trade"
+            ok, msg = self.apply_change(
+                "BASE_RISK_PER_TRADE_PCT", new_val,
+                trigger="HIGH_DRAWDOWN",
+                evidence=evidence,
+                sample_size=sample,
+                confidence=drawdown_pct * 5,
+                drawdown_pct=drawdown_pct,
+            )
+            if ok:
+                changes.append({"param": "BASE_RISK_PER_TRADE_PCT", "old": current_risk, "new": new_val, "reason": msg})
+
+        # --- SL too tight (avg net_rr well below threshold despite good gross_rr) ---
+        if avg_net_rr > 0 and avg_net_rr < 0.4:
+            current_atr = self.get_current_value("ATR_STOP_MULT")
+            new_val = min(1.5, current_atr + 0.1)
+            evidence = f"Avg net R:R={avg_net_rr:.2f} too low — widening ATR stop multiplier"
+            ok, msg = self.apply_change(
+                "ATR_STOP_MULT", new_val,
+                trigger="LOW_NET_RR",
+                evidence=evidence,
+                sample_size=sample,
+                confidence=70,
+                drawdown_pct=drawdown_pct,
+            )
+            if ok:
+                changes.append({"param": "ATR_STOP_MULT", "old": current_atr, "new": new_val, "reason": msg})
+
+        # --- Consecutive losses pattern → increase cooldown ---
+        recent_completed = paper_trades[-10:] if len(paper_trades) >= 10 else paper_trades
+        recent_losses = sum(1 for p in recent_completed if p.get("pnl", 0) <= 0)
+        if len(recent_completed) >= 5 and recent_losses >= 4:
+            current_cd = self.get_current_value("POST_LOSS_COOLDOWN_SEC")
+            new_val = min(300, current_cd + 30)
+            evidence = f"{recent_losses}/{len(recent_completed)} recent trades are losses — increasing cooldown"
+            ok, msg = self.apply_change(
+                "POST_LOSS_COOLDOWN_SEC", new_val,
+                trigger="CONSECUTIVE_LOSSES",
+                evidence=evidence,
+                sample_size=len(recent_completed),
+                confidence=recent_losses / len(recent_completed) * 100,
+                drawdown_pct=drawdown_pct,
+            )
+            if ok:
+                changes.append({"param": "POST_LOSS_COOLDOWN_SEC", "old": current_cd, "new": new_val, "reason": msg})
+
+        for c in changes:
+            logger.info(f"TUNING: {c['param']} {c['old']} → {c['new']} | {c['reason']}")
+
+        return changes
