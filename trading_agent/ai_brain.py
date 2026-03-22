@@ -111,12 +111,19 @@ def build_analysis_prompt(
 def parse_ai_response(response_text: str) -> Optional[DirectionalLicense]:
     """Parse LLM JSON response into a DirectionalLicense."""
     try:
-        # Strip markdown code fences if present
+        # Strip markdown code fences if present (handles ```json ... ``` wrapping)
         text = response_text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            text = "\n".join(lines)
+        if "```" in text:
+            # Extract content between code fences
+            import re
+            match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
+            if match:
+                text = match.group(1).strip()
+            else:
+                # Fallback: strip lines starting with ```
+                lines = text.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
 
         data = json.loads(text)
 

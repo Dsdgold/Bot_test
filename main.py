@@ -96,6 +96,7 @@ class ActivePosition:
     regime: Any = None
     sl_tp: Any = None
     opened_at: float = field(default_factory=time.time)
+    exchange_sl_set: bool = False  # Track if exchange SL/TP was successfully set
 
 
 # ---------------------------------------------------------------------------
@@ -418,10 +419,11 @@ def close_partial_position(direction: str, qty_btc: float) -> bool:
         return False
 
 
-def update_exchange_sl(positions: dict[str, ActivePosition]) -> None:
-    """Update exchange SL to the widest stop among active positions (safety net)."""
+def update_exchange_sl(positions: dict[str, ActivePosition]) -> bool:
+    """Update exchange SL to the widest stop among active positions (safety net).
+    Returns True if SL was successfully set on exchange."""
     if not positions:
-        return
+        return False
     first = next(iter(positions.values()))
     direction = first.direction
     if direction == "LONG":
@@ -438,12 +440,24 @@ def update_exchange_sl(positions: dict[str, ActivePosition]) -> None:
             positionIdx=0,
         )
         logger.info(f"Exchange safety SL updated: ${widest_sl:.2f}")
+        # Mark all positions as having exchange SL set
+        for p in positions.values():
+            p.exchange_sl_set = True
+        return True
     except Exception as e:
         err_str = str(e)
         if "34040" in err_str or "not modified" in err_str.lower():
             logger.debug(f"Exchange SL unchanged (same value): ${widest_sl:.2f}")
+            for p in positions.values():
+                p.exchange_sl_set = True
+            return True
+        elif "10001" in err_str or "zero position" in err_str.lower():
+            # Limit order not filled yet — will retry in monitoring loop
+            logger.warning(f"Exchange SL deferred: position not yet filled (limit order pending)")
+            return False
         else:
             logger.error(f"Exchange SL update error: {e}")
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -917,13 +931,21 @@ async def run_bot(dry_run: bool = False):
             if active_positions:
                 _sync_shared_positions(active_positions, price)
             if active_positions and len(active_positions) >= config.MAX_OPEN_POSITIONS:
+                # Retry exchange SL if limit order wasn't filled when we first tried
+                any_unprotected = any(not p.exchange_sl_set for p in active_positions.values())
+                if any_unprotected:
+                    sl_ok = update_exchange_sl(active_positions)
+                    if sl_ok:
+                        logger.info("Exchange SL set after limit order fill")
+
                 for tid, pos in active_positions.items():
                     unrealized = ((price - pos.entry_price) if pos.direction == "LONG"
                                   else (pos.entry_price - price)) * pos.qty_btc
+                    sl_status = "" if pos.exchange_sl_set else " [!NO EXCHANGE SL!]"
                     logger.info(
                         f"Position [{tid[:8]}]: {pos.direction} @ {pos.entry_price:.2f} | "
                         f"SL={pos.sl_price:.2f} TP={pos.tp_price:.2f} | "
-                        f"uPnL=${unrealized:+.2f} — monitoring..."
+                        f"uPnL=${unrealized:+.2f} — monitoring...{sl_status}"
                     )
                 if len(active_positions) >= config.MAX_OPEN_POSITIONS:
                     await asyncio.sleep(max(0, LOOP_INTERVAL_SEC - (time.time() - cycle_start)))
