@@ -25,7 +25,7 @@ ENABLE_FALLBACK_OVERRIDE = os.getenv("ENABLE_FALLBACK_OVERRIDE", "false").lower(
 # --- Regime filter ---
 REGIME_FILTER_ENABLED = os.getenv("REGIME_FILTER_ENABLED", "true").lower() == "true"
 USE_ADX_FILTER = os.getenv("USE_ADX_FILTER", "true").lower() == "true"
-ADX_MIN = float(os.getenv("ADX_MIN", "12"))
+ADX_MIN = float(os.getenv("ADX_MIN", "20"))
 USE_CHOP_FILTER = os.getenv("USE_CHOP_FILTER", "true").lower() == "true"
 CHOP_MAX = float(os.getenv("CHOP_MAX", "72"))
 DEAD_VOL_ATR_PCT_MIN = float(os.getenv("DEAD_VOL_ATR_PCT_MIN", "0.01"))
@@ -36,7 +36,7 @@ TRADE_QUALITY_MIN = int(os.getenv("TRADE_QUALITY_MIN", "30"))
 REVERSAL_QUALITY_MIN = int(os.getenv("REVERSAL_QUALITY_MIN", "45"))
 MAX_ENTRY_EXTENSION_ATR = float(os.getenv("MAX_ENTRY_EXTENSION_ATR", "4.0"))
 CANDLE_CLOSE_CONFIRMATION = os.getenv("CANDLE_CLOSE_CONFIRMATION", "false").lower() == "true"
-MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.01"))
+MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.3"))
 
 # --- Directional License ---
 LICENSE_VALIDITY_MINUTES = int(os.getenv("LICENSE_VALIDITY_MINUTES", "15"))
@@ -74,10 +74,10 @@ TARGET_RR_A_PLUS = float(os.getenv("TARGET_RR_A_PLUS", "2.0"))
 TARGET_RR_A = float(os.getenv("TARGET_RR_A", "1.8"))
 TARGET_RR_B = float(os.getenv("TARGET_RR_B", "1.5"))
 MIN_NET_RR = float(os.getenv("MIN_NET_RR", "0.7"))
-MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.18"))
-MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.30"))
-MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.30"))
-MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.60"))
+MIN_SL_PCT = float(os.getenv("MIN_SL_PCT", "0.12"))
+MAX_SL_PCT = float(os.getenv("MAX_SL_PCT", "0.20"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.20"))
+MAX_TP_PCT = float(os.getenv("MAX_TP_PCT", "0.40"))
 
 # --- Session filter ---
 SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").lower() == "true"

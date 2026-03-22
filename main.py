@@ -435,11 +435,12 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
 
         # Try limit order first (PostOnly = maker fees only, no taker)
         if config.PREFER_POST_ONLY_ENTRIES:
-            # Offset price to sit at top of book for quick fill
+            # Offset price closer to market for faster fills
+            # 0.9999 = $6.8 offset was too tight, 0.9997 = ~$20 gives better fill chance
             if direction == "LONG":
-                limit_price = round(price * 0.9999, 2)  # Just below market (top bid)
+                limit_price = round(price * 0.9997, 2)  # ~$20 below market
             else:
-                limit_price = round(price * 1.0001, 2)  # Just above market (top ask)
+                limit_price = round(price * 1.0003, 2)  # ~$20 above market
 
             try:
                 result = session.place_order(
@@ -1094,7 +1095,7 @@ async def run_bot(dry_run: bool = False):
                 update_exchange_sl(active_positions)
 
             # ── Check each active position for SL/TP hit or timeout ──
-            MAX_HOLD_SEC = 300  # 5 min max hold for scalping
+            MAX_HOLD_SEC = 900  # 15 min — give trades time to reach TP
             closed_ids: list[str] = []
             for tid, pos in list(active_positions.items()):
                 hit_sl = (price <= pos.sl_price) if pos.direction == "LONG" else (price >= pos.sl_price)
@@ -1113,10 +1114,24 @@ async def run_bot(dry_run: bool = False):
                     exit_price = pos.tp_price
                     exit_type = "TP"
                 else:
+                    # Smart timeout: check if we're near breakeven or profitable
+                    if pos.direction == "LONG":
+                        unrealized = (price - pos.entry_price) * pos.qty_btc
+                    else:
+                        unrealized = (pos.entry_price - price) * pos.qty_btc
+                    est_fees = (pos.entry_price + price) * pos.qty_btc * config.TAKER_FEE_RATE
+                    net_if_close = unrealized - est_fees
+
+                    # If deeply underwater (> $0.30 loss), extend timeout by 5 min
+                    # to give one more chance before closing at full loss
+                    if net_if_close < -0.30 and hold_time < MAX_HOLD_SEC + 300:
+                        continue  # Skip close, give 5 more minutes
+
                     exit_price = price
                     exit_type = "TIMEOUT"
                     logger.info(
-                        f"TIMEOUT [{tid[:8]}]: {pos.direction} held {int(hold_time)}s — force closing at market"
+                        f"TIMEOUT [{tid[:8]}]: {pos.direction} held {int(hold_time)}s "
+                        f"net≈${net_if_close:+.2f} — force closing at market"
                     )
 
                 if pos.direction == "LONG":
