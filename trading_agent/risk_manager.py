@@ -195,8 +195,14 @@ def calculate_dynamic_sl_tp(
         tp = entry_price * (1 - tp_pct / 100)
 
     # Fee-aware net R:R calculation
-    fee_cost = entry_price * fee_rate * 2  # Entry + exit
-    slip_cost = entry_price * slippage_rate * 2
+    # Entry: maker fee (limit order), Exit: taker fee (SL/TP = market order)
+    entry_fee = entry_price * config.MAKER_FEE_RATE if is_maker else entry_price * config.TAKER_FEE_RATE
+    exit_fee = entry_price * config.TAKER_FEE_RATE  # Exit is always taker (SL/TP hit)
+    fee_cost = entry_fee + exit_fee
+    # Slippage: 0 for maker entry, full for taker; always on exit
+    slip_entry = 0.0 if is_maker else entry_price * slippage_rate
+    slip_exit = entry_price * slippage_rate
+    slip_cost = slip_entry + slip_exit
 
     if direction == "LONG":
         net_reward = tp - entry_price - fee_cost - slip_cost

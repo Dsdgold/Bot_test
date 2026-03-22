@@ -222,7 +222,23 @@ async def get_directional_license(
             messages=[{"role": "user", "content": prompt}],
         )
 
-        response_text = response.content[0].text
+        response_text = response.content[0].text.strip()
+
+        # If response is empty or not JSON, retry once with explicit instruction
+        if not response_text or not response_text.startswith("{"):
+            logger.warning(f"AI returned non-JSON, retrying (got: {response_text[:80]}...)")
+            retry_response = client.messages.create(
+                model=config.LLM_MODEL,
+                max_tokens=512,
+                system=get_system_prompt(),
+                messages=[
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response_text or "Let me analyze"},
+                    {"role": "user", "content": "Respond with ONLY the JSON object. No text before or after."},
+                ],
+            )
+            response_text = retry_response.content[0].text.strip()
+
         license = parse_ai_response(response_text)
 
         if license is None:
