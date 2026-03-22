@@ -309,6 +309,91 @@ def _has_open_position(session) -> bool:
         return False
 
 
+def _get_exchange_position_size(session) -> tuple[float, str]:
+    """Get current exchange position size and side. Returns (size, side) or (0, '')."""
+    try:
+        result = session.get_positions(
+            category=config.CATEGORY, symbol=config.SYMBOL
+        )
+        positions = result.get("result", {}).get("list", [])
+        for pos in positions:
+            size = float(pos.get("size", "0"))
+            if size > 0:
+                return size, pos.get("side", "")
+        return 0.0, ""
+    except Exception:
+        return 0.0, ""
+
+
+def _sync_positions_with_exchange(
+    active_positions: dict[str, ActivePosition],
+    price: float,
+    agent,
+    journal,
+    dry_run: bool = False,
+) -> tuple[list[str], float]:
+    """Sync local positions with exchange. Detect SL/TP hit by exchange.
+    Returns (closed_ids, total_net_pnl_from_closures)."""
+    if dry_run or not active_positions:
+        return [], 0.0
+
+    try:
+        session = _get_session()
+        exch_size, exch_side = _get_exchange_position_size(session)
+    except Exception:
+        return [], 0.0
+
+    total_local_qty = sum(p.qty_btc for p in active_positions.values())
+    closed_ids = []
+    total_pnl = 0.0
+
+    # If exchange has NO position but we have local positions → exchange closed them (SL/TP hit)
+    if exch_size == 0 and total_local_qty > 0:
+        logger.warning(
+            f"EXCHANGE SYNC: No exchange position but {len(active_positions)} local position(s) "
+            f"(total {total_local_qty:.3f} BTC) — exchange SL/TP likely hit"
+        )
+        for tid, pos in list(active_positions.items()):
+            # Estimate PnL — we don't know exact exit price, use current price
+            if pos.direction == "LONG":
+                gross_pnl = (price - pos.entry_price) * pos.qty_btc
+            else:
+                gross_pnl = (pos.entry_price - price) * pos.qty_btc
+
+            # Check if price hit SL or TP to estimate exit
+            hit_sl = (price <= pos.sl_price) if pos.direction == "LONG" else (price >= pos.sl_price)
+            hit_tp = (price >= pos.tp_price) if pos.direction == "LONG" else (price <= pos.tp_price)
+
+            if hit_sl:
+                exit_price = pos.sl_price
+                exit_type = "SL_EXCHANGE"
+            elif hit_tp:
+                exit_price = pos.tp_price
+                exit_type = "TP_EXCHANGE"
+            else:
+                exit_price = price
+                exit_type = "EXCHANGE_CLOSE"
+
+            if pos.direction == "LONG":
+                gross_pnl = (exit_price - pos.entry_price) * pos.qty_btc
+            else:
+                gross_pnl = (pos.entry_price - exit_price) * pos.qty_btc
+
+            entry_notional = pos.entry_price * pos.qty_btc
+            exit_notional = exit_price * pos.qty_btc
+            fees = entry_notional * config.MAKER_FEE_RATE + exit_notional * config.TAKER_FEE_RATE
+            net_pnl = gross_pnl - fees
+
+            logger.info(
+                f"EXCHANGE CLOSED [{tid[:8]}]: {exit_type} | {pos.direction} @ {pos.entry_price:.2f} → "
+                f"${exit_price:.2f} | PnL=${net_pnl:+.2f}"
+            )
+            total_pnl += net_pnl
+            closed_ids.append(tid)
+
+    return closed_ids, total_pnl
+
+
 def _cancel_order(session, order_id: str) -> bool:
     """Cancel an open limit order."""
     try:
@@ -361,6 +446,7 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
                     logger.info(f"LIMIT ORDER: {side} {qty} BTC @ ${limit_price:.2f} (PostOnly) | id={order_id}")
 
                     # Wait for fill with timeout
+                    status = "New"
                     start = time.time()
                     while (time.time() - start) < LIMIT_ORDER_TIMEOUT_SEC:
                         time.sleep(2)
@@ -750,6 +836,51 @@ async def run_bot(dry_run: bool = False):
     # Active positions (multi-position tracking)
     active_positions: dict[str, ActivePosition] = {}  # trade_id -> ActivePosition
 
+    # ── Crash recovery: detect orphaned exchange positions on startup ──
+    if not dry_run:
+        try:
+            session = _get_session()
+            exch_size, exch_side = _get_exchange_position_size(session)
+            if exch_size > 0:
+                # We have a position on exchange but no local tracking
+                pos_info = session.get_positions(
+                    category=config.CATEGORY, symbol=config.SYMBOL
+                )
+                pos_data = pos_info.get("result", {}).get("list", [])
+                for pd in pos_data:
+                    psize = float(pd.get("size", "0"))
+                    if psize <= 0:
+                        continue
+                    direction = "LONG" if pd.get("side") == "Buy" else "SHORT"
+                    entry_p = float(pd.get("avgPrice", "0") or pd.get("entryPrice", "0"))
+                    # Set conservative SL/TP for orphaned position
+                    if direction == "LONG":
+                        sl_p = entry_p * (1 - config.MAX_SL_PCT / 100)
+                        tp_p = entry_p * (1 + config.MIN_TP_PCT / 100)
+                    else:
+                        sl_p = entry_p * (1 + config.MAX_SL_PCT / 100)
+                        tp_p = entry_p * (1 - config.MIN_TP_PCT / 100)
+
+                    trade_id = str(uuid.uuid4())
+                    recovered_pos = ActivePosition(
+                        trade_id=trade_id,
+                        direction=direction,
+                        entry_price=entry_p,
+                        sl_price=sl_p,
+                        tp_price=tp_p,
+                        qty_btc=psize,
+                    )
+                    active_positions[trade_id] = recovered_pos
+                    logger.warning(
+                        f"CRASH RECOVERY: Found orphaned {direction} position "
+                        f"{psize} BTC @ ${entry_p:.2f} — tracking as [{trade_id[:8]}] "
+                        f"SL=${sl_p:.2f} TP=${tp_p:.2f}"
+                    )
+                if active_positions:
+                    update_exchange_sl(active_positions)
+        except Exception as e:
+            logger.warning(f"Crash recovery check failed: {e}")
+
     logger.info("=" * 60)
     logger.info(f" BTCUSDT Scalping Bot — {'DRY RUN' if dry_run else 'LIVE'}")
     logger.info(f" Testnet: {config.BYBIT_TESTNET}")
@@ -841,6 +972,37 @@ async def run_bot(dry_run: bool = False):
             # ── Update MFE/MAE for active positions ──
             if active_positions:
                 agent.update_price_tick(price)
+
+            # ── Exchange sync: detect SL/TP hit by exchange ──
+            if active_positions and not dry_run:
+                sync_closed, sync_pnl = _sync_positions_with_exchange(
+                    active_positions, price, agent, journal, dry_run
+                )
+                if sync_closed:
+                    for tid in sync_closed:
+                        pos = active_positions.pop(tid)
+                        # Record in agent for stats
+                        if pos.license and pos.gate_result:
+                            exit_type = "SL" if sync_pnl < 0 else "TP"
+                            agent.close_trade(
+                                pos.license, pos.gate_result, pos.regime,
+                                candles_1m, price, exit_type,
+                                sync_pnl, 0, sync_pnl,  # fees already included
+                                sl_tp=pos.sl_tp,
+                            )
+                    daily_pnl += sync_pnl
+                    weekly_pnl += sync_pnl
+                    if sync_pnl < 0:
+                        consecutive_losses += 1
+                    else:
+                        consecutive_losses = 0
+                    last_trade_time = time.time()
+                    relax_level = 0
+                    _sync_shared_positions(active_positions, price)
+                    logger.info(
+                        f"EXCHANGE SYNC complete: {len(sync_closed)} position(s) closed, "
+                        f"PnL=${sync_pnl:+.2f}, Equity=${agent.equity:.2f}"
+                    )
 
             # ── Trailing Stop Loss: lock in profits progressively ──
             # When unrealized profit reaches a threshold, move SL to lock partial profit.
@@ -1406,6 +1568,29 @@ async def run_bot(dry_run: bool = False):
 
         except Exception as e:
             logger.error(f"Cycle {cycle} error: {e}", exc_info=True)
+            # On error, check if we still have exchange positions to protect
+            if active_positions and not dry_run:
+                try:
+                    update_exchange_sl(active_positions)
+                except Exception:
+                    pass
+
+        # ── Periodic equity re-sync from exchange (every 10 cycles / 5 min) ──
+        if cycle % 10 == 0 and not dry_run:
+            try:
+                real_equity = await fetch_account_equity()
+                if real_equity > 0:
+                    drift = abs(real_equity - agent.equity)
+                    if drift > 0.50:  # More than $0.50 drift
+                        logger.warning(
+                            f"EQUITY DRIFT: local=${agent.equity:.2f} vs exchange=${real_equity:.2f} "
+                            f"(drift=${drift:.2f}) — syncing to exchange"
+                        )
+                        agent.equity = real_equity
+                    if real_equity > peak_equity:
+                        peak_equity = real_equity
+            except Exception:
+                pass
 
         # Wait for next cycle
         elapsed = time.time() - cycle_start

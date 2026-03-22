@@ -363,8 +363,7 @@ class TradingAgent:
             mae=mae,
         )
 
-        # Update equity and stats
-        self.equity += net_pnl
+        # Update stats (equity is updated by main loop to avoid double-counting)
         self.data_collector.record_trade_stats(is_win, net_pnl)
         self.data_collector.save_equity_snapshot(self.equity, force=True)
 
