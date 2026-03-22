@@ -266,9 +266,42 @@ async def fetch_account_equity() -> float:
 # Order execution
 # ---------------------------------------------------------------------------
 
+LIMIT_ORDER_TIMEOUT_SEC = 10  # Max wait for limit fill before switching to market
+
+
+def _check_order_filled(session, order_id: str) -> bool:
+    """Check if a limit order has been filled on the exchange."""
+    try:
+        result = session.get_open_orders(
+            category=config.CATEGORY, symbol=config.SYMBOL, orderId=order_id
+        )
+        orders = result.get("result", {}).get("list", [])
+        # If order is NOT in open orders, it was filled (or cancelled)
+        if not orders:
+            return True
+        # Check status
+        status = orders[0].get("orderStatus", "")
+        return status in ("Filled", "PartiallyFilled")
+    except Exception:
+        return False
+
+
+def _cancel_order(session, order_id: str) -> bool:
+    """Cancel an open limit order."""
+    try:
+        result = session.cancel_order(
+            category=config.CATEGORY, symbol=config.SYMBOL, orderId=order_id
+        )
+        return result.get("retCode") == 0
+    except Exception as e:
+        logger.warning(f"Cancel order error: {e}")
+        return False
+
+
 def place_order(direction: str, size_usd: float, price: float) -> dict | None:
     """
-    Place an order on Bybit. Uses limit (PostOnly) when preferred, falls back to market.
+    Place an order on Bybit. Tries limit (PostOnly) with fill timeout,
+    falls back to market if limit doesn't fill within LIMIT_ORDER_TIMEOUT_SEC.
     direction: 'LONG' or 'SHORT'
     Returns order result dict or None on failure.
     """
@@ -283,11 +316,11 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
 
         # Try limit order first (PostOnly = maker fees only, no taker)
         if config.PREFER_POST_ONLY_ENTRIES:
-            # Offset price slightly to ensure fill (0.01% inside spread)
+            # Offset price to sit at top of book for quick fill
             if direction == "LONG":
-                limit_price = round(price * 0.9999, 2)  # Just below market
+                limit_price = round(price * 0.9999, 2)  # Just below market (top bid)
             else:
-                limit_price = round(price * 1.0001, 2)  # Just above market
+                limit_price = round(price * 1.0001, 2)  # Just above market (top ask)
 
             try:
                 result = session.place_order(
@@ -303,13 +336,29 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
                 if result.get("retCode") == 0:
                     order_id = result["result"]["orderId"]
                     logger.info(f"LIMIT ORDER: {side} {qty} BTC @ ${limit_price:.2f} (PostOnly) | id={order_id}")
-                    return result["result"]
+
+                    # Wait for fill with timeout
+                    start = time.time()
+                    while (time.time() - start) < LIMIT_ORDER_TIMEOUT_SEC:
+                        time.sleep(2)
+                        if _check_order_filled(session, order_id):
+                            logger.info(f"LIMIT FILLED: {side} {qty} BTC @ ${limit_price:.2f} (maker fee)")
+                            result["result"]["_filled_as"] = "MAKER"
+                            return result["result"]
+
+                    # Timeout — cancel and fall back to market
+                    logger.warning(
+                        f"Limit order not filled in {LIMIT_ORDER_TIMEOUT_SEC}s — "
+                        f"cancelling and using market"
+                    )
+                    _cancel_order(session, order_id)
+                    time.sleep(0.5)  # Brief pause after cancel
                 else:
                     logger.warning(f"Limit order rejected: {result.get('retMsg')} — falling back to market")
             except Exception as e:
                 logger.warning(f"Limit order failed: {e} — falling back to market")
 
-        # Fallback: market order
+        # Fallback: market order (guaranteed fill)
         result = session.place_order(
             category=config.CATEGORY,
             symbol=config.SYMBOL,
@@ -322,6 +371,7 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
         if result.get("retCode") == 0:
             order_id = result["result"]["orderId"]
             logger.info(f"MARKET ORDER: {side} {qty} BTC @ market | order_id={order_id}")
+            result["result"]["_filled_as"] = "TAKER"
             return result["result"]
         else:
             logger.error(f"ORDER FAILED: {result.get('retMsg', 'Unknown error')}")
