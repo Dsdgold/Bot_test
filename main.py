@@ -706,11 +706,11 @@ async def run_bot(dry_run: bool = False):
 
             # ── Fetch data (with rate limit spacing) ──
             candles_1m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_1M, 100)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
             candles_5m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_5M, 50)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
             candles_15m = await fetch_candles(config.SYMBOL, config.TIMEFRAME_15M, 50)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
             candles_1h = await fetch_candles(config.SYMBOL, config.TIMEFRAME_1H, 30)
 
             if not candles_1m:
