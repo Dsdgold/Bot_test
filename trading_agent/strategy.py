@@ -148,10 +148,15 @@ def check_candle_close(
 
 def check_volume(candles_1m: Sequence[CandleData]) -> tuple[bool, str]:
     """Require current bar volume ≥ MIN_VOLUME_RATIO × average."""
+    if config.MIN_VOLUME_RATIO <= 0:
+        return True, "Volume check disabled"
     if not candles_1m or len(candles_1m) < 3:
         return False, "Insufficient volume data"
 
     ratio = volume_ratio(candles_1m)
+    # If current candle just opened (zero volume), skip check — don't block
+    if ratio == 0.0 and candles_1m[-1].volume == 0:
+        return True, "Volume OK: new candle (no data yet)"
     if ratio >= config.MIN_VOLUME_RATIO:
         return True, f"Volume OK: ratio={ratio:.2f}x (min {config.MIN_VOLUME_RATIO})"
     return False, f"Weak volume: ratio={ratio:.2f}x < {config.MIN_VOLUME_RATIO}"
@@ -353,11 +358,11 @@ def evaluate_entry_gates(
     if not cvd_ok:
         result.add_block(f"CVD: {cvd_reason}")
 
-    # Gate H: OI confirmation
+    # Gate H: OI confirmation — warn only, don't block
     oi_ok, oi_reason = check_oi(oi_current, oi_previous, price_new_extreme)
     result.oi_ok = oi_ok
     if not oi_ok:
-        result.add_block(f"OI: {oi_reason}")
+        logger.info(f"OI WARNING (non-blocking): {oi_reason}")
 
     # Gate I: Session filter
     session_ok, session_reason = check_session_filter()

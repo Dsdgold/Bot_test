@@ -341,6 +341,18 @@ def close_partial_position(direction: str, qty_btc: float) -> bool:
     """Close a partial position (reduceOnly) for multi-position management."""
     try:
         session = _get_session()
+        # Check if position still exists on exchange before trying to close
+        pos_info = session.get_positions(
+            category=config.CATEGORY, symbol=config.SYMBOL
+        )
+        pos_list = pos_info.get("result", {}).get("list", [])
+        has_position = any(
+            float(p.get("size", 0)) > 0 for p in pos_list
+        )
+        if not has_position:
+            logger.info("Position already closed by exchange (SL/TP hit)")
+            return True
+
         side = "Sell" if direction == "LONG" else "Buy"
         result = session.place_order(
             category=config.CATEGORY,

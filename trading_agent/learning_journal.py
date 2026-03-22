@@ -440,14 +440,12 @@ class LearningJournal:
             client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
             response = client.messages.create(
                 model=config.LLM_MODEL,
-                max_tokens=500,
+                max_tokens=800,
                 system=(
-                    "You are an elite trading performance analyst and AI trading coach. "
-                    "You analyze every trade deeply — entry quality, timing, regime fit, "
-                    "risk management, and execution. You think out loud, share your "
-                    "internal reasoning, and find patterns across trades. "
-                    "You grade each trade honestly and suggest specific improvements. "
-                    "Write your thoughts as if journaling your analysis process."
+                    "You are an elite trading performance analyst. "
+                    "Analyze the trade and respond with ONLY a JSON object. "
+                    "Keep all string values SHORT (under 100 chars each). "
+                    "Grade each trade honestly."
                 ),
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -456,7 +454,17 @@ class LearningJournal:
                 lines = text.split("\n")
                 text = "\n".join(l for l in lines if not l.strip().startswith("```"))
 
-            data = json.loads(text)
+            # Try to fix truncated JSON by closing open strings/braces
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                # Attempt to salvage truncated JSON
+                fixed = text.rstrip()
+                if fixed.count('"') % 2 == 1:
+                    fixed += '"'
+                while fixed.count('{') > fixed.count('}'):
+                    fixed += '}'
+                data = json.loads(fixed)
 
             # Build rich observation with AI thoughts
             thoughts = data.get("thoughts", "")
