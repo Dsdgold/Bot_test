@@ -269,19 +269,42 @@ async def fetch_account_equity() -> float:
 LIMIT_ORDER_TIMEOUT_SEC = 10  # Max wait for limit fill before switching to market
 
 
-def _check_order_filled(session, order_id: str) -> bool:
-    """Check if a limit order has been filled on the exchange."""
+def _check_order_filled(session, order_id: str) -> str:
+    """Check limit order status. Returns 'Filled', 'Open', 'Cancelled', or 'Unknown'."""
     try:
+        # Check order history (filled/cancelled orders)
+        result = session.get_order_history(
+            category=config.CATEGORY, symbol=config.SYMBOL, orderId=order_id
+        )
+        orders = result.get("result", {}).get("list", [])
+        if orders:
+            return orders[0].get("orderStatus", "Unknown")
+
+        # Check open orders (still active)
         result = session.get_open_orders(
             category=config.CATEGORY, symbol=config.SYMBOL, orderId=order_id
         )
         orders = result.get("result", {}).get("list", [])
-        # If order is NOT in open orders, it was filled (or cancelled)
-        if not orders:
-            return True
-        # Check status
-        status = orders[0].get("orderStatus", "")
-        return status in ("Filled", "PartiallyFilled")
+        if orders:
+            return orders[0].get("orderStatus", "Open")
+
+        return "Unknown"
+    except Exception:
+        return "Unknown"
+
+
+def _has_open_position(session) -> bool:
+    """Check if there's already an open position on the exchange."""
+    try:
+        result = session.get_positions(
+            category=config.CATEGORY, symbol=config.SYMBOL
+        )
+        positions = result.get("result", {}).get("list", [])
+        for pos in positions:
+            size = float(pos.get("size", "0"))
+            if size > 0:
+                return True
+        return False
     except Exception:
         return False
 
@@ -341,18 +364,33 @@ def place_order(direction: str, size_usd: float, price: float) -> dict | None:
                     start = time.time()
                     while (time.time() - start) < LIMIT_ORDER_TIMEOUT_SEC:
                         time.sleep(2)
-                        if _check_order_filled(session, order_id):
+                        status = _check_order_filled(session, order_id)
+                        if status == "Filled":
                             logger.info(f"LIMIT FILLED: {side} {qty} BTC @ ${limit_price:.2f} (maker fee)")
                             result["result"]["_filled_as"] = "MAKER"
                             return result["result"]
+                        elif status == "Cancelled":
+                            logger.info("Limit order was cancelled by exchange — falling back to market")
+                            break
 
                     # Timeout — cancel and fall back to market
-                    logger.warning(
-                        f"Limit order not filled in {LIMIT_ORDER_TIMEOUT_SEC}s — "
-                        f"cancelling and using market"
-                    )
-                    _cancel_order(session, order_id)
-                    time.sleep(0.5)  # Brief pause after cancel
+                    if status not in ("Filled", "Cancelled"):
+                        logger.warning(
+                            f"Limit order not filled in {LIMIT_ORDER_TIMEOUT_SEC}s — "
+                            f"cancelling and using market"
+                        )
+                    cancel_ok = _cancel_order(session, order_id)
+                    time.sleep(0.5)
+
+                    # CRITICAL: Check if position exists before market fallback
+                    # Cancel may fail if order was filled between last check and cancel
+                    if not cancel_ok and _has_open_position(session):
+                        logger.info(
+                            "Limit order was filled (cancel failed + position exists) — "
+                            "skipping market fallback"
+                        )
+                        result["result"]["_filled_as"] = "MAKER"
+                        return result["result"]
                 else:
                     logger.warning(f"Limit order rejected: {result.get('retMsg')} — falling back to market")
             except Exception as e:
